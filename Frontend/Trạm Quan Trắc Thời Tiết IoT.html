@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trạm Quan Trắc Thời Tiết IoT</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <style>
+      :root {
+              --bg: #1b2a41;
+              --bg-mid: #2f4863;
+              --bg-bottom: #4a6a82;
+              --panel: #22384f;
+              --panel-strong: #22384f;
+              --line: #4a6684;
+              --line-strong: rgba(176, 201, 223, 0.24);
+              --text: #f7f9fa;
+              --muted: #d3dde4;
+              --navy: #dfeeff;
+              --navy-soft: rgba(194, 221, 255, 0.12);
+              --cyan: #6fb8d6;
+              --green: #5fcf7a;
+              --amber: #edd066;
+              --orange: #ef9169;
+              --red: #e8716d;
+              --loading: #9aa7b0;
+              --shadow: 0 18px 28px rgba(10, 18, 30, 0.24);
+              --radius: 18px;
+            }
+
+            * { box-sizing: border-box; }
+            html, body { margin: 0; height: 100%; }
+            body {
+              font-family: "Segoe UI", "Inter", "Arial", sans-serif;
+              background: linear-gradient(180deg, var(--bg) 0%, var(--bg-mid) 50%, var(--bg-bottom) 100%);
+              color: var(--text);
+            }
+
+      .page-shell {
+        max-width: 1300px;
+        margin: 0 auto;
+        padding: 24px 26px 36px;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 18px;
+      }
+
+      .page-brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .brand-mark {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        background: rgba(173, 208, 255, 0.08);
+        color: #dfeeff;
+        font-size: 1.15rem;
+        border: 1px solid rgba(173, 208, 255, 0.18);
+      }
+
+      .title-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.75rem, 2vw, 2.3rem);
+        line-height: 1.2;
+        letter-spacing: -0.04em;
+      }
+
+      .demo-badge {
+        padding: 5px 10px;
+        border-radius: 999px;
+        background: rgba(242, 169, 59, 0.15);
+        color: #f5d18a;
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      .connect-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 14px;
+        border-radius: 999px;
+        background: rgba(204, 223, 245, 0.08);
+        border: 1px solid rgba(204, 223, 245, 0.12);
+        color: var(--text);
+        font-weight: 700;
+        font-size: 0.92rem;
+      }
+
+      .connect-pill.warning {
+        background: rgba(232, 113, 109, 0.09);
+        border-color: rgba(232, 113, 109, 0.25);
+        color: var(--red);
+      }
+
+      .connect-pill.pending {
+        background: rgba(154, 167, 176, 0.1);
+        border-color: rgba(154, 167, 176, 0.18);
+        color: var(--loading);
+      }
+
+      .pulse-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 0 0 rgba(95, 207, 122, 0.35);
+        animation: pulse 1.8s infinite;
+      }
+
+      .warning .pulse-dot { box-shadow: 0 0 0 0 rgba(232, 113, 109, 0.35); }
+      .pending .pulse-dot { box-shadow: 0 0 0 0 rgba(154, 167, 176, 0.35); }
+
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(29, 156, 116, 0.35); }
+        70% { box-shadow: 0 0 0 10px rgba(29, 156, 116, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(29, 156, 116, 0); }
+      }
+
+      .meta-block { min-width: 150px; }
+      .meta-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      .meta-value {
+        font-size: 0.9rem;
+        color: var(--text);
+        font-weight: 700;
+        margin-top: 3px;
+      }
+
+      .refresh-btn {
+        border: 1px solid var(--line);
+        background: rgba(34, 56, 79, 0.85);
+        color: var(--text);
+        border-radius: 12px;
+        padding: 10px 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .refresh-btn:hover {
+        transform: translateY(-1px); box-shadow: var(--shadow);
+      }
+      .refresh-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.52;
+        filter: grayscale(0.1);
+      }
+
+      .device-overview {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        padding: 18px 20px;
+        background: rgba(34, 56, 79, 0.9);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        margin-bottom: 18px;
+        box-shadow: 0 12px 18px rgba(8, 16, 25, 0.12);
+      }
+      .device-item { padding: 6px 8px; }
+      .device-item .label {
+        font-size: 0.74rem;
+        letter-spacing: 0.02em;
+        text-transform: none;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .device-item .value {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+        font-size: 1.05rem;
+      }
+
+      .quality-bars {
+        display: inline-flex;
+        align-items: end;
+        gap: 2px;
+        height: 14px;
+      }
+      .quality-bars span {
+        display: block;
+        width: 4px;
+        border-radius: 3px;
+        background: #dfe7f0;
+      }
+      .quality-bars span:nth-child(1) { height: 4px; }
+      .quality-bars span:nth-child(2) { height: 7px; }
+      .quality-bars span:nth-child(3) { height: 10px; }
+      .quality-bars span:nth-child(4) { height: 13px; }
+      .quality-bars.good span { background: var(--green); }
+      .quality-bars.weak span:nth-child(-n+2) { background: var(--amber); }
+      .quality-bars.weak span:nth-child(n+3) { background: #dfe7f0; }
+
+      .ai-banner {
+        display: none;
+        align-items: center;
+        gap: 12px;
+        background: rgba(232, 113, 109, 0.09);
+        border: 1px solid rgba(232, 113, 109, 0.22);
+        border-radius: 14px;
+        padding: 12px 16px;
+        margin-bottom: 20px;
+        color: #ffd7d5;
+        font-weight: 600;
+      }
+      .ai-banner.show { display: flex; }
+      .ai-banner .icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: rgba(232, 113, 109, 0.18);
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 22px;
+      }
+      .sensor-card {
+        position: relative;
+        background: rgba(34, 56, 79, 0.82);
+        border: 1px solid var(--line);
+        border-top: 3px solid var(--sensor-color, var(--navy));
+        border-radius: var(--radius);
+        padding: 18px 18px 16px;
+        box-shadow: 0 12px 18px rgba(10, 18, 30, 0.12);
+      }
+      .sensor-card.temp { --sensor-color: var(--orange); }
+      .sensor-card.hum { --sensor-color: var(--cyan); }
+      .sensor-card.light { --sensor-color: var(--amber); }
+      .sensor-card.rain { --sensor-color: var(--green); }
+
+      .card-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .sensor-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .sensor-label svg {
+        width: 18px; height: 18px; color: var(--sensor-color);
+      }
+      .status-badge {
+        border-radius: 999px;
+        padding: 5px 9px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+      }
+      .status-badge.pending { background: rgba(154, 167, 176, 0.12); color: var(--loading); }
+      .status-badge.normal { background: rgba(95, 207, 122, 0.12); color: var(--green); }
+      .status-badge.abnormal { background: rgba(232, 113, 109, 0.12); color: var(--red); }
+      .sensor-value {
+        display: flex; align-items: flex-end; gap: 6px;
+        line-height: 1; margin-bottom: 8px; min-height: 48px;
+      }
+      .sensor-value strong {
+        font-size: clamp(2rem, 2vw, 2.4rem); letter-spacing: -0.06em;
+      }
+      .sensor-value span {
+        color: var(--muted); font-size: 0.95rem; padding-bottom: 6px;
+      }
+      .trend {
+        min-height: 18px; color: var(--muted); font-size: 0.82rem; margin-bottom: 7px;
+      }
+      .trend.up, .trend.down { color: var(--muted); }
+      .range-note { font-size: 0.76rem; color: var(--muted); margin-bottom: 8px; }
+      .sensor-summary { font-size: 0.82rem; color: var(--muted); }
+      .sparkline {
+        width: 100%; height: 38px; margin-top: 14px; opacity: 0.8;
+      }
+
+      .panel {
+        background: var(--panel-strong);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+      .chart-panel { padding: 18px 18px 12px; margin-bottom: 20px; }
+      .panel-head {
+        display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px;
+      }
+      .panel-head h2 {
+        margin: 0; font-size: 1.14rem; display: inline-flex; align-items: center; gap: 8px;
+      }
+      .panel-head h2 svg { color: var(--red); }
+      .page-footer {
+        margin-top: 16px; padding-bottom: 12px; text-align: center; color: var(--muted); font-size: 0.76rem; opacity: 0.8;
+      }
+      .toolbar {
+        display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+      }
+      .tab-group, .range-group {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      }
+      .tab-button, .range-button, .compare-button {
+        border: 1px solid var(--line); background: rgba(187, 211, 236, 0.08); color: var(--muted); padding: 7px 12px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease;
+      }
+      .tab-button.active, .range-button.active, .compare-button.active {
+        background: rgba(189, 218, 255, 0.14); color: var(--text); border-color: rgba(189, 218, 255, 0.22);
+      }
+      .tab-button:focus-visible, .range-button:focus-visible, .compare-button:focus-visible, .refresh-btn:focus-visible {
+        outline: 2px solid rgba(236, 238, 251, 0.9);
+        outline-offset: 2px;
+      }
+      .compare-button {
+        display: inline-flex; align-items: center; gap: 8px; border-radius: 999px;
+      }
+      .chart-wrapper { height: 310px; }
+
+      .alerts-panel { padding: 18px; }
+      .alert-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+      .alert-item {
+        display: grid; grid-template-columns: 110px 1fr auto; gap: 8px 14px; align-items: center;
+        background: rgba(242, 169, 59, 0.05); border: 1px solid rgba(242, 169, 59, 0.14); border-radius: 12px; padding: 10px 12px;
+      }
+      .alert-item .time { color: var(--muted); font-size: 0.75rem; }
+      .alert-item .message { font-weight: 600; color: var(--text); }
+      .alert-item .meta {
+        display: block; margin-top: 4px; color: var(--muted); font-size: 0.76rem;
+      }
+      .alert-tag {
+        border-radius: 999px; padding: 4px 10px; font-size: 0.7rem; font-weight: 800; background: rgba(217,74,74,0.1); color: var(--red);
+      }
+      .empty-state {
+        padding: 18px; border: 1px dashed var(--line-strong); border-radius: 12px; text-align: center; color: var(--muted); font-size: 0.9rem;
+      }
+
+      @media (max-width: 980px) {
+        .stats-grid, .device-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 700px) {
+        .page-shell { padding: 20px 16px 32px; }
+        .topbar { align-items: flex-start; }
+        .header-actions { width: 100%; justify-content: flex-start; }
+        .stats-grid, .device-overview { grid-template-columns: 1fr; }
+        .toolbar { align-items: stretch; }
+        .tab-group, .range-group { width: 100%; }
+        .tab-button, .range-button { flex: 1; justify-content: center; }
+        .alert-item { grid-template-columns: 1fr auto; }
+        .alert-item .time { grid-column: 1 / -1; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div class="page-brand">
+          <div class="brand-mark">◌</div>
+          <div>
+            <div class="title-row">
+              <h1>Trạm Quan Trắc Thời Tiết IoT</h1>
+              <span class="demo-badge">DEMO</span>
+            </div>
+            <p class="subtitle">Giám sát môi trường theo thời gian thực</p>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <div class="connect-pill" id="connection-pill"><span class="pulse-dot"></span><span id="connection-text">Đang kết nối</span></div>
+          <div class="meta-block">
+            <div class="meta-label">Cập nhật lần cuối</div>
+            <div class="meta-value" id="last-updated">--:--:--</div>
+          </div>
+          <button class="refresh-btn" id="refresh-btn" type="button">Làm mới dữ liệu</button>
+        </div>
+      </header>
+
+      <section class="device-overview" aria-label="Thông tin thiết bị">
+        <div class="device-item">
+          <div class="label">Device ID</div>
+          <div class="value">ESP8266-WX01</div>
+        </div>
+        <div class="device-item">
+          <div class="label">Vị trí</div>
+          <div class="value">Khu công nghiệp A</div>
+        </div>
+        <div class="device-item">
+          <div class="label">Wi‑Fi</div>
+          <div class="value">
+            <span class="quality-bars good" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+            <span id="rssi">-52 dBm</span>
+          </div>
+        </div>
+        <div class="device-item">
+          <div class="label">Uptime</div>
+          <div class="value" id="uptime">18h 42m</div>
+        </div>
+      </section>
+
+      <div class="ai-banner" id="ai-banner" aria-live="polite">
+        <span class="icon">⚠</span>
+        <span id="ai-banner-text">Cảnh báo đánh giá từ mô hình AI</span>
+      </div>
+
+      <section class="stats-grid" aria-label="Chỉ số môi trường">
+        <article class="sensor-card temp" aria-live="polite">
+          <div class="card-top">
+            <div class="sensor-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V4a2 2 0 0 0-4 0v10.76a4 4 0 1 0 4 0Z" /></svg>
+              <span>Nhiệt độ</span>
+            </div>
+            <span class="status-badge pending" id="badge-temp">Đang chờ</span>
+          </div>
+          <div class="sensor-value"><strong id="value-temp">--</strong><span>°C</span></div>
+          <div class="trend" id="trend-temp">--</div>
+          <div class="range-note" id="range-temp">Hôm nay: --</div>
+          <div class="sensor-summary" id="summary-temp">--</div>
+          <svg class="sparkline" id="spark-temp" viewBox="0 0 100 38" preserveAspectRatio="none"></svg>
+        </article>
+
+        <article class="sensor-card hum" aria-live="polite">
+          <div class="card-top">
+            <div class="sensor-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69s5 5.1 5 9.56A5 5 0 0 1 7 12.25c0-4.46 5-9.56 5-9.56Z" /></svg>
+              <span>Độ ẩm</span>
+            </div>
+            <span class="status-badge pending" id="badge-hum">Đang chờ</span>
+          </div>
+          <div class="sensor-value"><strong id="value-hum">--</strong><span>%</span></div>
+          <div class="trend" id="trend-hum">--</div>
+          <div class="range-note" id="range-hum">Hôm nay: --</div>
+          <div class="sensor-summary" id="summary-hum">--</div>
+          <svg class="sparkline" id="spark-hum" viewBox="0 0 100 38" preserveAspectRatio="none"></svg>
+        </article>
+
+        <article class="sensor-card light" aria-live="polite">
+          <div class="card-top">
+            <div class="sensor-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></svg>
+              <span>Ánh sáng</span>
+            </div>
+            <span class="status-badge pending" id="badge-light">Đang chờ</span>
+          </div>
+          <div class="sensor-value"><strong id="value-light">--</strong><span>lux</span></div>
+          <div class="trend" id="trend-light">--</div>
+          <div class="range-note" id="range-light">Hôm nay: --</div>
+          <div class="sensor-summary" id="summary-light">--</div>
+          <svg class="sparkline" id="spark-light" viewBox="0 0 100 38" preserveAspectRatio="none"></svg>
+        </article>
+
+        <article class="sensor-card rain" aria-live="polite">
+          <div class="card-top">
+            <div class="sensor-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25" /></svg>
+              <span>Mưa</span>
+            </div>
+            <span class="status-badge pending" id="badge-rain">Đang chờ</span>
+          </div>
+          <div class="sensor-value"><strong id="value-rain">--</strong><span id="rain-unit">--</span></div>
+          <div class="trend" id="trend-rain">--</div>
+          <div class="range-note" id="range-rain">Cảm biến: --</div>
+          <div class="sensor-summary" id="summary-rain">--</div>
+          <svg class="sparkline" id="spark-rain" viewBox="0 0 100 38" preserveAspectRatio="none"></svg>
+        </article>
+      </section>
+
+      <section class="panel chart-panel" aria-label="Lịch sử dữ liệu">
+        <div class="panel-head">
+          <h2>Lịch sử dữ liệu môi trường</h2>
+        </div>
+
+        <div class="toolbar">
+          <div class="tab-group" id="series-tabs" role="tablist" aria-label="Chọn chỉ số">
+            <button type="button" class="tab-button active" data-key="temp" role="tab" aria-selected="true">Nhiệt độ</button>
+            <button type="button" class="tab-button" data-key="hum" role="tab" aria-selected="false">Độ ẩm</button>
+            <button type="button" class="tab-button" data-key="light" role="tab" aria-selected="false">Ánh sáng</button>
+            <button type="button" class="tab-button" data-key="rain" role="tab" aria-selected="false">Mưa</button>
+          </div>
+
+          <div class="range-group" id="range-tabs" aria-label="Chọn khoảng thời gian">
+            <button type="button" class="range-button active" data-range="1h">1 giờ</button>
+            <button type="button" class="range-button" data-range="6h">6 giờ</button>
+            <button type="button" class="range-button" data-range="24h">24 giờ</button>
+            <button type="button" class="range-button" data-range="7d">7 ngày</button>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <button type="button" class="compare-button" id="compare-btn" aria-pressed="false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18" /></svg>
+            <span>So sánh với Độ ẩm</span>
+          </button>
+        </div>
+
+        <div class="chart-wrapper">
+          <canvas id="history-chart" aria-label="Biểu đồ lịch sử dữ liệu"></canvas>
+        </div>
+      </section>
+
+      <section class="panel alerts-panel" aria-label="Cảnh báo bất thường">
+        <div class="panel-head">
+          <h2>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3.5a7 7 0 0 1 7 7c0 4.3-2.7 6.8-4.4 8.9a2.2 2.2 0 0 1-5.2 0C7.7 17.3 5 14.8 5 10.5a7 7 0 0 1 7-7Z" />
+              <path d="M12 8v4" />
+              <circle cx="12" cy="15.5" r="0.9" fill="currentColor" stroke="none" />
+            </svg>
+            Cảnh báo bất thường
+          </h2>
+          <span class="meta-label" id="ai-status">Module AI: chưa kết nối</span>
+        </div>
+        <div class="meta-label" id="last-check" hidden></div>
+        <div class="alert-list" id="alert-list">
+          <div class="empty-state">Chưa có dữ liệu để phân tích</div>
+        </div>
+      </section>
+
+      <footer class="page-footer">Dữ liệu demo cho mục đích trình diễn giao diện.</footer>
+    </div>
+
+    <script>
+      const formatTime = (d = new Date()) => {
+        return [d.getHours(), d.getMinutes(), d.getSeconds()].map(v => String(v).padStart(2, '0')).join(':');
+      };
+
+      const chartMeta = {
+        temp: { label: 'Nhiệt độ', unit: '°C', color: '#ef9169' },
+        hum: { label: 'Độ ẩm', unit: '%', color: '#6fb8d6' },
+        light: { label: 'Ánh sáng', unit: 'lux', color: '#edd066' },
+        rain: { label: 'Mưa', unit: '', color: '#7fb897' }
+      };
+
+      const MAX_HISTORY_POINTS = 72;
+      const historyState = { temp: [], hum: [], light: [], rain: [], range: '1h', active: 'temp', compare: false };
+      const readingState = { temp: 28.4, hum: 62, light: 540, rain: 0, lastTemp: null, lastHum: null, lastLight: null, lastRain: null };
+      const connectionState = { lastDataAt: Date.now(), offlineThresholdMs: 30000 };
+      const aiState = { connected: false, hasChecked: false, lastCheck: null };
+      const $ = (id) => document.getElementById(id);
+
+      function addHistoryPoint(key, value) {
+        historyState[key].push(value);
+        if (historyState[key].length > MAX_HISTORY_POINTS) {
+          historyState[key].shift();
+        }
+      }
+
+      function setBadge(id, state) {
+        const el = $(id);
+        if (state === 'pending') {
+          el.textContent = 'Đang chờ';
+          el.className = 'status-badge pending';
+          return;
+        }
+        el.textContent = state === 'abnormal' ? 'Bất thường' : 'Bình thường';
+        el.className = `status-badge ${state}`;
+      }
+
+      function setTrend(elementId, current, previous, unit) {
+        const el = document.getElementById(elementId);
+        if (previous == null || !Number.isFinite(previous)) {
+          el.textContent = '—';
+          el.className = 'trend';
+          return;
+        }
+        const delta = current - previous;
+        if (Math.abs(delta) < 0.05) {
+          el.textContent = 'Ổn định so với lần trước';
+          el.className = 'trend';
+          return;
+        }
+        const direction = delta > 0 ? 'up' : 'down';
+        const sign = delta > 0 ? '+' : '-';
+        el.textContent = `${direction === 'up' ? '↑' : '↓'} ${sign}${Math.abs(delta).toFixed(1)}${unit} so với lần trước`;
+        el.className = `trend ${direction}`;
+      }
+
+      function updateSparkline(svgId, values, color) {
+        const svg = document.getElementById(svgId);
+        if (!values.length) { svg.innerHTML = ''; return; }
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const range = max - min || 1;
+        const points = values.map((value, index) => {
+          const x = (index / Math.max(values.length - 1, 1)) * 100;
+          const y = 38 - ((value - min) / range) * 30 - 4;
+          return `${x},${y}`;
+        }).join(' ');
+
+        svg.innerHTML = `
+          <defs>
+            <linearGradient id="grad-${svgId}" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="${color}" stop-opacity="0.35"></stop>
+              <stop offset="100%" stop-color="${color}" stop-opacity="0.02"></stop>
+            </linearGradient>
+          </defs>
+          <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+          <polyline points="0,38 ${points} 100,38" fill="url(#grad-${svgId})" stroke="none"></polyline>
+        `;
+      }
+
+      function updateCards(data) {
+        $('value-temp').textContent = Number(data.temp).toFixed(1);
+        $('value-hum').textContent = Number(data.hum).toFixed(0);
+        $('value-light').textContent = Number(data.light).toFixed(0);
+        $('value-rain').textContent = data.rain ? 'Có mưa' : 'Khô ráo';
+        $('rain-unit').textContent = data.rain ? 'mưa' : 'khô';
+
+        setTrend('trend-temp', data.temp, readingState.lastTemp, '°C');
+        setTrend('trend-hum', data.hum, readingState.lastHum, '%');
+        setTrend('trend-light', data.light, readingState.lastLight, ' lux');
+        $('trend-rain').textContent = data.rain !== readingState.lastRain ? (data.rain ? '↑ có mưa' : '↓ không mưa') : 'Ổn định';
+        $('trend-rain').className = 'trend';
+
+        const tempValues = historyState.temp.slice(-12);
+        const humValues = historyState.hum.slice(-12);
+        const lightValues = historyState.light.slice(-12);
+        const tempMin = Math.min(...tempValues);
+        const tempMax = Math.max(...tempValues);
+        const humMin = Math.min(...humValues);
+        const humMax = Math.max(...humValues);
+        const lightMin = Math.min(...lightValues);
+        const lightMax = Math.max(...lightValues);
+
+        $('range-temp').textContent = Number.isFinite(tempMin) ? `Hôm nay: ${tempMin.toFixed(1)}–${tempMax.toFixed(1)}°C` : 'Hôm nay: --';
+        $('range-hum').textContent = Number.isFinite(humMin) ? `Hôm nay: ${humMin.toFixed(0)}–${humMax.toFixed(0)}%` : 'Hôm nay: --';
+        $('range-light').textContent = Number.isFinite(lightMin) ? `Hôm nay: ${lightMin.toFixed(0)}–${lightMax.toFixed(0)} lux` : 'Hôm nay: --';
+        $('range-rain').textContent = data.rain ? 'Cảm biến: ướt' : 'Cảm biến: khô';
+
+        $('summary-temp').textContent = data.temp > 31 ? 'Nhiệt độ cao, cần kiểm tra tủ nhiệt' : data.temp < 21 ? 'Mát hơn so với mức trung bình' : 'Nhiệt độ ở mức ổn định';
+        $('summary-hum').textContent = data.hum > 80 ? 'Độ ẩm cao, nguy cơ ẩm mốc' : data.hum < 35 ? 'Không khí khô, cần bổ sung độ ẩm' : 'Độ ẩm trong ngưỡng cho phép';
+        $('summary-light').textContent = data.light > 700 ? 'Ánh sáng mạnh, môi trường khá sáng' : data.light < 150 ? 'Môi trường tối, kiểm tra đèn' : 'Ánh sáng ở mức vừa phải';
+        $('summary-rain').textContent = data.rain ? 'Phát hiện bề mặt ẩm, có khả năng mưa' : 'Bề mặt khô, không phát hiện mưa';
+
+        setBadge('badge-temp', data.temp > 35 ? 'abnormal' : 'normal');
+        setBadge('badge-hum', data.hum > 82 ? 'abnormal' : 'normal');
+        setBadge('badge-light', data.light < 80 ? 'abnormal' : 'normal');
+        setBadge('badge-rain', 'normal');
+
+        readingState.lastTemp = data.temp;
+        readingState.lastHum = data.hum;
+        readingState.lastLight = data.light;
+        readingState.lastRain = data.rain;
+
+        updateSparkline('spark-temp', historyState.temp.slice(-20), '#ef9169');
+        updateSparkline('spark-hum', historyState.hum.slice(-20), '#6fb8d6');
+        updateSparkline('spark-light', historyState.light.slice(-20), '#edd066');
+        updateSparkline('spark-rain', historyState.rain.slice(-20), '#7fb897');
+      }
+
+      function setAiState() {
+        const status = $('ai-status');
+        const last = $('last-check');
+        if (aiState.hasChecked) {
+          status.textContent = aiState.connected ? 'Module AI: quy tắc demo' : 'Module AI: quy tắc demo';
+          last.hidden = false;
+          last.textContent = `Lần kiểm tra gần nhất: ${formatTime(aiState.lastCheck || new Date())}`;
+        } else {
+          status.textContent = 'Module AI: chưa kết nối';
+          last.hidden = true;
+          last.textContent = '';
+        }
+      }
+
+      function showAlertList(message) {
+        const list = $('alert-list');
+        list.innerHTML = `<div class="empty-state">${message}</div>`;
+      }
+
+      function addAlert(sensor, value, threshold, message, severity) {
+        const list = $('alert-list');
+        const empty = list.querySelector('.empty-state');
+        if (empty) empty.remove();
+        const row = document.createElement('div');
+        row.className = 'alert-item';
+        row.innerHTML = `
+          <div class="time">${formatTime()}</div>
+          <div>
+            <div class="message">${message}</div>
+            <span class="meta">Cảm biến: ${sensor} · Giá trị: ${value} · Ngưỡng: ${threshold}</span>
+          </div>
+          <span class="alert-tag">${severity}</span>
+        `;
+        list.prepend(row);
+        while (list.children.length > 5) list.removeChild(list.lastChild);
+      }
+
+      function showBanner(text) {
+        const banner = $('ai-banner');
+        const textNode = $('ai-banner-text');
+        if (!text) {
+          banner.classList.remove('show');
+          textNode.textContent = '';
+          return;
+        }
+        textNode.textContent = text;
+        banner.classList.add('show');
+        clearTimeout(showBanner.tid);
+        showBanner.tid = setTimeout(() => banner.classList.remove('show'), 7000);
+      }
+
+      function checkAnomaly(data) {
+        aiState.connected = false;
+        aiState.hasChecked = true;
+        aiState.lastCheck = new Date();
+        setAiState();
+
+        const alerts = [];
+
+        if (data.temp > 35) {
+          alerts.push({ sensor: 'Nhiệt độ', value: `${data.temp.toFixed(1)}°C`, threshold: '≤ 35°C', message: 'Nhiệt độ vượt ngưỡng an toàn.', severity: 'Cao' });
+        }
+        if (data.hum > 82) {
+          alerts.push({ sensor: 'Độ ẩm', value: `${data.hum.toFixed(0)}%`, threshold: '≤ 82%', message: 'Độ ẩm cao bất thường, có nguy cơ ẩm mốc.', severity: 'Trung bình' });
+        }
+        if (data.light < 80) {
+          alerts.push({ sensor: 'Ánh sáng', value: `${data.light.toFixed(0)} lux`, threshold: '≥ 80 lux', message: 'Ánh sáng quá thấp so với điều kiện tối ưu.', severity: 'Thấp' });
+        }
+
+        const alertList = $('alert-list');
+        alertList.innerHTML = '';
+
+        if (alerts.length) {
+          alerts.forEach(({ sensor, value, threshold, message, severity }) => addAlert(sensor, value, threshold, message, severity));
+          const primary = alerts[0].message;
+          showBanner(primary === 'Nhiệt độ vượt ngưỡng an toàn.' ? 'Nhiệt độ vượt ngưỡng an toàn và cần kiểm tra hệ thống làm mát.' : primary);
+        } else {
+          showBanner('');
+          showAlertList('Không phát hiện bất thường');
+        }
+      }
+
+      function setConnectionState(state, label) {
+        const pill = $('connection-pill');
+        pill.classList.remove('warning', 'pending');
+        if (state === 'warning') pill.classList.add('warning');
+        if (state === 'pending') pill.classList.add('pending');
+        $('connection-text').textContent = label;
+      }
+
+      function updateConnectionState() {
+        const now = Date.now();
+        const isOffline = now - connectionState.lastDataAt > connectionState.offlineThresholdMs;
+        if (isOffline) {
+          setConnectionState('warning', 'Mất kết nối');
+        } else {
+          setConnectionState('online', 'Đã kết nối');
+        }
+      }
+
+      function setCompareButton() {
+        const compareMap = {
+          temp: 'Độ ẩm',
+          hum: 'Nhiệt độ',
+          light: 'Độ ẩm',
+          rain: 'Độ ẩm'
+        };
+        const compareTarget = compareMap[historyState.active] || 'Độ ẩm';
+        const btn = $('compare-btn');
+        const text = btn.querySelector('span');
+        const isPressed = historyState.compare;
+        btn.classList.toggle('active', isPressed);
+        btn.setAttribute('aria-pressed', String(isPressed));
+        text.textContent = isPressed ? `Tắt so sánh với ${compareTarget}` : `So sánh với ${compareTarget}`;
+      }
+
+      function createSeriesForRange(range) {
+        const points = range === '1h' ? 24 : range === '6h' ? 28 : range === '24h' ? 36 : 30;
+        const baseTemp = 29 + Math.random() * 4;
+        const baseHum = 60 + Math.random() * 18;
+        const baseLight = 550 + Math.random() * 220;
+        const temp = []; const hum = []; const light = []; const rain = [];
+
+        for (let i = 0; i < points; i += 1) {
+          temp.push(Number((baseTemp + Math.sin(i / 3) * 2.8 + (Math.random() - 0.5) * 1.6).toFixed(1)));
+          hum.push(Math.round(Math.min(92, Math.max(28, baseHum + Math.cos(i / 4) * 12 + (Math.random() - 0.5) * 8))));
+          light.push(Math.round(Math.min(1200, Math.max(30, baseLight + Math.sin(i / 2.8) * 170 + (Math.random() - 0.5) * 120))));
+          rain.push(Math.random() > 0.82 ? 1 : 0);
+        }
+        return { temp, hum, light, rain };
+      }
+
+      function refreshData() {
+        $('last-updated').textContent = formatTime();
+        connectionState.lastDataAt = Date.now();
+
+        const next = {
+          temp: Number((readingState.temp + (Math.random() - 0.5) * 2.6).toFixed(1)),
+          hum: Math.round(readingState.hum + (Math.random() - 0.5) * 14),
+          light: Math.round(readingState.light + (Math.random() - 0.5) * 140),
+          rain: Math.random() > 0.72 ? 1 : 0
+        };
+
+        readingState.temp = Math.min(39, Math.max(18, next.temp));
+        readingState.hum = Math.min(95, Math.max(25, next.hum));
+        readingState.light = Math.min(1200, Math.max(30, next.light));
+        readingState.rain = next.rain;
+
+        addHistoryPoint('temp', readingState.temp);
+        addHistoryPoint('hum', readingState.hum);
+        addHistoryPoint('light', readingState.light);
+        addHistoryPoint('rain', readingState.rain);
+
+        updateCards(readingState);
+        renderChart();
+        checkAnomaly(readingState);
+        updateConnectionState();
+      }
+
+      function buildChartLabels(range) {
+        const now = new Date();
+        const length = range === '1h' ? 24 : range === '6h' ? 28 : range === '24h' ? 36 : 30;
+        const labels = [];
+        for (let index = length - 1; index >= 0; index -= 1) {
+          const d = new Date(now.getTime() - index * 5 * 60 * 1000);
+          if (range === '7d') labels.push(`${d.getDate()}/${d.getMonth() + 1}`);
+          else labels.push(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+        }
+        return labels;
+      }
+
+      function renderChart() {
+        const canvas = document.getElementById('history-chart');
+        if (!canvas.__chart) {
+          canvas.__chart = new Chart(canvas, {
+            type: 'line',
+            data: {
+              labels: buildChartLabels(historyState.range),
+              datasets: [
+                { label: 'Nhiệt độ', data: [], borderColor: '#ef9169', backgroundColor: 'rgba(239,145,105,0.15)', borderWidth: 2.5, pointRadius: 0, tension: 0.35, fill: false, yAxisID: 'y' },
+                { label: 'Độ ẩm', data: [], borderColor: '#6fb8d6', backgroundColor: 'rgba(111,184,214,0.12)', borderWidth: 2, pointRadius: 0, tension: 0.35, fill: false, yAxisID: 'y1', hidden: true }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: {
+                legend: { display: true, labels: { color: '#d3dde4', usePointStyle: true, boxWidth: 10, boxHeight: 10, padding: 16 } },
+                tooltip: { callbacks: { label(context) { return `${context.dataset.label}: ${context.parsed.y}${context.dataset.unit || ''}`; } } }
+              },
+              scales: {
+                x: { grid: { color: 'rgba(211,221,228,0.12)' }, ticks: { color: '#d3dde4' }, title: { display: true, text: 'Thời gian', color: '#d3dde4' } },
+                y: { position: 'left', grid: { color: 'rgba(211,221,228,0.12)' }, ticks: { color: '#d3dde4' }, title: { display: true, text: 'Nhiệt độ (°C)', color: '#d3dde4' } },
+                y1: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#d3dde4' }, title: { display: true, text: 'Độ ẩm (%)', color: '#d3dde4' } }
+              }
+            }
+          });
+        }
+
+        const activeKey = historyState.active;
+        const compareKey = historyState.compare ? (activeKey === 'temp' ? 'hum' : activeKey === 'hum' ? 'temp' : 'hum') : null;
+        const labels = buildChartLabels(historyState.range);
+        const chart = canvas.__chart;
+        const activeData = historyState[activeKey].slice(-labels.length);
+        const comparison = compareKey ? historyState[compareKey].slice(-labels.length) : [];
+
+        chart.data.labels = labels;
+        chart.data.datasets[0].label = chartMeta[activeKey].label;
+        chart.data.datasets[0].unit = chartMeta[activeKey].unit;
+        chart.data.datasets[0].data = activeData;
+        chart.data.datasets[0].borderColor = chartMeta[activeKey].color;
+        chart.data.datasets[0].backgroundColor = `${chartMeta[activeKey].color}22`;
+        chart.data.datasets[0].hidden = false;
+
+        chart.data.datasets[1].label = compareKey ? chartMeta[compareKey].label : 'Độ ẩm';
+        chart.data.datasets[1].unit = compareKey ? chartMeta[compareKey].unit : '%';
+        chart.data.datasets[1].data = comparison;
+        chart.data.datasets[1].borderColor = compareKey ? chartMeta[compareKey].color : '#6fb8d6';
+        chart.data.datasets[1].backgroundColor = compareKey ? `${chartMeta[compareKey].color}22` : 'rgba(111,184,214,0.12)';
+        chart.data.datasets[1].hidden = !compareKey;
+
+        chart.options.scales.y.title.text = `${chartMeta[activeKey].label} (${chartMeta[activeKey].unit})`;
+        chart.options.scales.y1.title.text = compareKey ? `${chartMeta[compareKey].label} (${chartMeta[compareKey].unit})` : 'Độ ẩm (%)';
+        chart.options.scales.y1.display = !!compareKey;
+        chart.update();
+      }
+
+      document.getElementById('refresh-btn').addEventListener('click', () => refreshData());
+      document.getElementById('series-tabs').addEventListener('click', (event) => {
+        const button = event.target.closest('.tab-button');
+        if (!button) return;
+        historyState.active = button.dataset.key;
+        document.querySelectorAll('.tab-button').forEach((el) => {
+          const selected = el === button;
+          el.classList.toggle('active', selected);
+          el.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+        setCompareButton();
+        renderChart();
+      });
+      document.getElementById('range-tabs').addEventListener('click', (event) => {
+        const button = event.target.closest('.range-button');
+        if (!button) return;
+        historyState.range = button.dataset.range;
+        document.querySelectorAll('.range-button').forEach((el) => el.classList.toggle('active', el === button));
+        renderChart();
+      });
+      document.getElementById('compare-btn').addEventListener('click', () => {
+        historyState.compare = !historyState.compare;
+        setCompareButton();
+        renderChart();
+      });
+
+      function initialize() {
+        const initial = createSeriesForRange('1h');
+        historyState.temp = initial.temp; historyState.hum = initial.hum; historyState.light = initial.light; historyState.rain = initial.rain;
+        readingState.temp = Number(initial.temp[initial.temp.length - 1].toFixed(1));
+        readingState.hum = initial.hum[initial.hum.length - 1];
+        readingState.light = initial.light[initial.light.length - 1];
+        readingState.rain = initial.rain[initial.rain.length - 1] ?? 0;
+
+        $('last-updated').textContent = formatTime();
+        connectionState.lastDataAt = Date.now();
+        setConnectionState('online', 'Đã kết nối');
+        setCompareButton();
+        updateCards(readingState);
+        renderChart();
+        setAiState();
+        checkAnomaly(readingState);
+      }
+
+      initialize();
+      setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          refreshData();
+        }
+        updateConnectionState();
+      }, 12000);
+    </script>
+  </body>
+</html>

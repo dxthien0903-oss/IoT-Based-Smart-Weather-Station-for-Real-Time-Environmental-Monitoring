@@ -1,0 +1,17 @@
+{
+  "name": "weather-station-backend",
+  "version": "1.0.0",
+  "description": "Backend cho đồ án IoT-Based Smart Weather Station (ESP8266)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "dotenv": "^18.0.8",
+    "express": "^4.21.0"
+  }
+}
