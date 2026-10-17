@@ -16,10 +16,10 @@
 DHT dht(DHTPIN, DHTTYPE);
 
 // ---------- Cấu hình Wi-Fi & server ----------
-const char* ssid        = "TEN_WIFI_CUA_BAN";
-const char* password    = "MAT_KHAU_WIFI";
-const char* serverUrl   = "http://192.168.1.23:3000/api/sensors"; // đổi thành IP máy chạy backend
-const char* deviceApiKey = "doi-key-nay-thanh-chuoi-bi-mat-cua-ban"; // PHẢI khớp DEVICE_API_KEY trong .env
+const char* ssid        = "Xuan Thai";
+const char* password    = "123456789";
+const char* serverUrl   = "http://192.168.1.98:3000/api/sensors"; // đổi thành IP máy chạy backend
+const char* deviceApiKey = "tonlien007"; // PHẢI khớp DEVICE_API_KEY trong .env
 const char* deviceId     = "ESP8266-WX01";
 
 const unsigned long SEND_INTERVAL_MS = 10000; // 10 giây/lần, chỉnh theo nhu cầu
