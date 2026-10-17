@@ -575,6 +575,7 @@
       const connectionState = { lastDataAt: Date.now(), offlineThresholdMs: 30000 };
       const aiState = { connected: false, hasChecked: false, lastCheck: null };
       const $ = (id) => document.getElementById(id);
+      const API_BASE = 'http://localhost:3000';
 
       function addHistoryPoint(key, value) {
         historyState[key].push(value);
@@ -802,32 +803,40 @@
         text.textContent = isPressed ? `Tắt so sánh với ${compareTarget}` : `So sánh với ${compareTarget}`;
       }
 
-      function createSeriesForRange(range) {
-        const points = range === '1h' ? 24 : range === '6h' ? 28 : range === '24h' ? 36 : 30;
-        const baseTemp = 29 + Math.random() * 4;
-        const baseHum = 60 + Math.random() * 18;
-        const baseLight = 550 + Math.random() * 220;
-        const temp = []; const hum = []; const light = []; const rain = [];
+      async function fetchHistory(range) {
+        const res = await fetch(`${API_BASE}/api/sensors/history?range=${range}`);
+        if (!res.ok) throw new Error('Không lấy được lịch sử');
+        const data = await res.json();
+        return { temp: data.temp, hum: data.hum, light: data.light, rain: data.rain };
+}
 
-        for (let i = 0; i < points; i += 1) {
-          temp.push(Number((baseTemp + Math.sin(i / 3) * 2.8 + (Math.random() - 0.5) * 1.6).toFixed(1)));
-          hum.push(Math.round(Math.min(92, Math.max(28, baseHum + Math.cos(i / 4) * 12 + (Math.random() - 0.5) * 8))));
-          light.push(Math.round(Math.min(1200, Math.max(30, baseLight + Math.sin(i / 2.8) * 170 + (Math.random() - 0.5) * 120))));
-          rain.push(Math.random() > 0.82 ? 1 : 0);
-        }
-        return { temp, hum, light, rain };
+      async function refreshData() {
+        try {
+        const res = await fetch(`${API_BASE}/api/sensors/latest`);
+        if (res.status === 204) return; // backend chưa có dữ liệu nào
+
+        const data = await res.json();
+        $('last-updated').textContent = formatTime(new Date(data.timestamp));
+        connectionState.lastDataAt = new Date(data.timestamp).getTime();
+
+        readingState.temp = data.temp;
+        readingState.hum = data.hum;
+        readingState.light = data.light;
+        readingState.rain = data.rain;
+
+        addHistoryPoint('temp', data.temp);
+        addHistoryPoint('hum', data.hum);
+        addHistoryPoint('light', data.light);
+        addHistoryPoint('rain', data.rain);
+
+        updateCards(readingState);
+        renderChart();
+        checkAnomaly(readingState);
+        updateConnectionState();
+      } catch (err) {
+        console.error(err);
+        setConnectionState('warning', 'Lỗi kết nối server');
       }
-
-      function refreshData() {
-        $('last-updated').textContent = formatTime();
-        connectionState.lastDataAt = Date.now();
-
-        const next = {
-          temp: Number((readingState.temp + (Math.random() - 0.5) * 2.6).toFixed(1)),
-          hum: Math.round(readingState.hum + (Math.random() - 0.5) * 14),
-          light: Math.round(readingState.light + (Math.random() - 0.5) * 140),
-          rain: Math.random() > 0.72 ? 1 : 0
-        };
 
         readingState.temp = Math.min(39, Math.max(18, next.temp));
         readingState.hum = Math.min(95, Math.max(25, next.hum));
@@ -927,36 +936,39 @@
         setCompareButton();
         renderChart();
       });
-      document.getElementById('range-tabs').addEventListener('click', (event) => {
-        const button = event.target.closest('.range-button');
-        if (!button) return;
-        historyState.range = button.dataset.range;
-        document.querySelectorAll('.range-button').forEach((el) => el.classList.toggle('active', el === button));
-        renderChart();
-      });
+      document.getElementById('range-tabs').addEventListener('click', async (event) => {
+  const button = event.target.closest('.range-button');
+  if (!button) return;
+  historyState.range = button.dataset.range;
+  document.querySelectorAll('.range-button').forEach((el) => el.classList.toggle('active', el === button));
+  try {
+    const data = await fetchHistory(historyState.range);
+    historyState.temp = data.temp; historyState.hum = data.hum;
+    historyState.light = data.light; historyState.rain = data.rain;
+  } catch (err) { console.error(err); }
+  renderChart();
+});
       document.getElementById('compare-btn').addEventListener('click', () => {
         historyState.compare = !historyState.compare;
         setCompareButton();
         renderChart();
       });
 
-      function initialize() {
-        const initial = createSeriesForRange('1h');
-        historyState.temp = initial.temp; historyState.hum = initial.hum; historyState.light = initial.light; historyState.rain = initial.rain;
-        readingState.temp = Number(initial.temp[initial.temp.length - 1].toFixed(1));
-        readingState.hum = initial.hum[initial.hum.length - 1];
-        readingState.light = initial.light[initial.light.length - 1];
-        readingState.rain = initial.rain[initial.rain.length - 1] ?? 0;
+      async function initialize() {
+  try {
+    const initial = await fetchHistory('1h');
+    historyState.temp = initial.temp;
+    historyState.hum = initial.hum;
+    historyState.light = initial.light;
+    historyState.rain = initial.rain;
+  } catch (err) {
+    console.error('Không lấy được lịch sử ban đầu:', err);
+  }
 
-        $('last-updated').textContent = formatTime();
-        connectionState.lastDataAt = Date.now();
-        setConnectionState('online', 'Đã kết nối');
-        setCompareButton();
-        updateCards(readingState);
-        renderChart();
-        setAiState();
-        checkAnomaly(readingState);
-      }
+  await refreshData(); // lấy số liệu mới nhất + vẽ lại mọi thứ
+  setCompareButton();
+  setAiState();
+}
 
       initialize();
       setInterval(() => {
@@ -964,7 +976,7 @@
           refreshData();
         }
         updateConnectionState();
-      }, 12000);
+      }, 10000);
     </script>
   </body>
 </html>
