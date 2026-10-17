@@ -838,11 +838,6 @@
         setConnectionState('warning', 'Lỗi kết nối server');
       }
 
-        readingState.temp = Math.min(39, Math.max(18, next.temp));
-        readingState.hum = Math.min(95, Math.max(25, next.hum));
-        readingState.light = Math.min(1200, Math.max(30, next.light));
-        readingState.rain = next.rain;
-
         addHistoryPoint('temp', readingState.temp);
         addHistoryPoint('hum', readingState.hum);
         addHistoryPoint('light', readingState.light);
