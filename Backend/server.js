@@ -104,12 +104,13 @@ const latestReading = db.prepare(`
   SELECT * FROM readings ORDER BY created_at DESC LIMIT 1
 `);
 
-const rangeToSql = {
-  '1h':  "datetime('now', '-1 hour')",
-  '6h':  "datetime('now', '-6 hour')",
-  '24h': "datetime('now', '-1 day')",
-  '7d':  "datetime('now', '-7 day')",
-};
+   const FMT = "'%Y-%m-%dT%H:%M:%fZ'";
+   const rangeToSql = {
+     '1h':  `strftime(${FMT}, 'now', '-1 hour')`,
+     '6h':  `strftime(${FMT}, 'now', '-6 hour')`,
+     '24h': `strftime(${FMT}, 'now', '-1 day')`,
+     '7d':  `strftime(${FMT}, 'now', '-7 day')`,
+   };
 
 // ---------- App ----------
 const app = express();
@@ -136,6 +137,9 @@ app.post('/api/sensors', requireDeviceKey, (req, res) => {
     return res.status(400).json({ error: 'rain phải là 0 hoặc 1' });
   }
 
+  const found = detectAnomalies({ temp, hum, light });
+  found.forEach((a) => insertAlert.run(a));
+
   insertReading.run({
     temp, hum, light, rain,
     device_id: device_id || 'ESP8266-WX01',
@@ -152,7 +156,7 @@ app.get('/api/sensors/latest', (req, res) => {
     return res.status(204).end(); // chưa có dữ liệu nào — frontend giữ trạng thái "Đang chờ"
   }
 
-  const ageMs = Date.now() - new Date(row.created_at + 'Z'.replace('ZZ', 'Z')).getTime();
+  const ageMs = Date.now() - new Date(row.created_at).getTime();
   res.json({
     temp: row.temp,
     hum: row.hum,
@@ -184,6 +188,14 @@ app.get('/api/sensors/history', (req, res) => {
   });
 });
 
+   // ---------- GET /api/alerts ----------
+   app.get('/api/alerts', (req, res) => {
+     const limit = Math.min(Number(req.query.limit) || 20, 100);
+     const rows = db
+       .prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT ?')
+       .all(limit);
+     res.json(rows);
+   });
 // ---------- Health check ----------
 app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
