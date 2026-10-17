@@ -30,6 +30,71 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_readings_created_at ON readings(created_at);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sensor TEXT NOT NULL,
+    value REAL NOT NULL,
+    expected TEXT,
+    reason TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+`);
+
+const insertAlert = db.prepare(`
+  INSERT INTO alerts (sensor, value, expected, reason, severity)
+  VALUES (@sensor, @value, @expected, @reason, @severity)
+`);
+
+const recentReadings = db.prepare(
+  'SELECT temp, hum, light FROM readings ORDER BY created_at DESC LIMIT 30'
+);
+
+// Giới hạn vật lý hợp lý + độ lệch chuẩn tối thiểu cho từng cảm biến
+const SENSORS = {
+  temp:  { label: 'Nhiệt độ', unit: '°C',  min: -10, max: 50,   minStd: 0.5 },
+  hum:   { label: 'Độ ẩm',    unit: '%',   min: 0,   max: 100,  minStd: 2 },
+  light: { label: 'Ánh sáng', unit: ' lux', min: 0,  max: 2000, minStd: 50 },
+};
+
+function detectAnomalies(reading) {
+  const history = recentReadings.all(); // gọi TRƯỚC khi insert bản ghi mới
+  const alerts = [];
+
+  for (const [key, cfg] of Object.entries(SENSORS)) {
+    const v = reading[key];
+
+    // 1) Ngoài giới hạn vật lý
+    if (v < cfg.min || v > cfg.max) {
+      alerts.push({
+        sensor: key, value: v,
+        expected: `${cfg.min} đến ${cfg.max}${cfg.unit}`,
+        reason: `${cfg.label} ngoài khoảng hợp lý`,
+        severity: 'high',
+      });
+      continue;
+    }
+
+    // 2) Lệch mạnh so với 30 lần đo gần nhất (z-score)
+    if (history.length >= 10) {
+      const vals = history.map((h) => h[key]);
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const std = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
+      const z = Math.abs(v - mean) / Math.max(std, cfg.minStd);
+      if (z > 3) {
+        alerts.push({
+          sensor: key, value: v,
+          expected: `${mean.toFixed(1)}${cfg.unit} ± ${(3 * Math.max(std, cfg.minStd)).toFixed(1)}`,
+          reason: `${cfg.label} thay đổi đột ngột`,
+          severity: 'medium',
+        });
+      }
+    }
+  }
+  return alerts;
+}
+
 const insertReading = db.prepare(`
   INSERT INTO readings (temp, hum, light, rain, device_id, rssi)
   VALUES (@temp, @hum, @light, @rain, @device_id, @rssi)
