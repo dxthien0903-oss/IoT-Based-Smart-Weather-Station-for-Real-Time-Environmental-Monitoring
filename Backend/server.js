@@ -116,6 +116,7 @@ const latestReading = db.prepare(`
 const app = express();
 app.use(cors());              // cho phép frontend (khác origin) gọi API
 app.use(express.json());      // parse JSON body từ ESP8266
+app.use(express.static(path.join(__dirname, '..', 'Frontend')));
 
 // Middleware kiểm tra API key cho endpoint ghi dữ liệu (ESP8266 -> server)
 function requireDeviceKey(req, res, next) {

@@ -575,7 +575,7 @@
       const connectionState = { lastDataAt: Date.now(), offlineThresholdMs: 30000 };
       const aiState = { connected: false, hasChecked: false, lastCheck: null };
       const $ = (id) => document.getElementById(id);
-      const API_BASE = 'http://localhost:3000';
+      const API_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : location.origin;
 
       function addHistoryPoint(key, value) {
         historyState[key].push(value);
@@ -802,51 +802,98 @@
         btn.setAttribute('aria-pressed', String(isPressed));
         text.textContent = isPressed ? `Tắt so sánh với ${compareTarget}` : `So sánh với ${compareTarget}`;
       }
+            const SENSOR_LABEL = { temp: 'Nhiệt độ', hum: 'Độ ẩm', light: 'Ánh sáng' };
+      const SENSOR_UNIT = { temp: '°C', hum: '%', light: ' lux' };
+      const SEVERITY_LABEL = { high: 'Cao', medium: 'Trung bình', low: 'Thấp' };
+
+      async function loadAlerts() {
+        const res = await fetch(`${API_BASE}/api/alerts?limit=20`);
+        if (!res.ok) throw new Error('Không lấy được cảnh báo');
+        const alerts = await res.json();
+
+        aiState.connected = true;
+        aiState.hasChecked = true;
+        aiState.lastCheck = new Date();
+        setAiState();
+
+        const list = $('alert-list');
+        list.innerHTML = '';
+        if (!alerts.length) showAlertList('Chưa phát hiện bất thường');
+
+        alerts.forEach((a) => {
+          const d = new Date(a.created_at);
+          const unit = SENSOR_UNIT[a.sensor] || '';
+          const row = document.createElement('div');
+          row.className = 'alert-item';
+          row.innerHTML = `
+            <div class="time">${d.getDate()}/${d.getMonth() + 1} ${formatTime(d)}</div>
+            <div>
+              <div class="message">${a.reason}</div>
+              <span class="meta">Cảm biến: ${SENSOR_LABEL[a.sensor] || a.sensor} · Giá trị: ${a.value}${unit} · Kỳ vọng: ${a.expected || '—'}</span>
+            </div>
+            <span class="alert-tag">${SEVERITY_LABEL[a.severity] || a.severity}</span>
+          `;
+          list.appendChild(row);
+        });
+
+        // Badge trên thẻ chỉ báo "Bất thường" nếu có cảnh báo trong 60 giây gần nhất
+        const now = Date.now();
+        ['temp', 'hum', 'light'].forEach((k) => {
+          const recent = alerts.some((a) => a.sensor === k && now - new Date(a.created_at).getTime() < 60000);
+          setBadge(`badge-${k}`, recent ? 'abnormal' : 'normal');
+        });
+        setBadge('badge-rain', 'normal');
+
+        // Banner chỉ hiện với cảnh báo rất mới (dưới 20 giây)
+        const fresh = alerts.find((a) => now - new Date(a.created_at).getTime() < 20000);
+        showBanner(fresh ? `${fresh.reason}: ${fresh.value}${SENSOR_UNIT[fresh.sensor] || ''}` : '');
+      }
 
       async function fetchHistory(range) {
         const res = await fetch(`${API_BASE}/api/sensors/history?range=${range}`);
         if (!res.ok) throw new Error('Không lấy được lịch sử');
         const data = await res.json();
-        return { temp: data.temp, hum: data.hum, light: data.light, rain: data.rain };
-}
-
-      async function refreshData() {
-        try {
-        const res = await fetch(`${API_BASE}/api/sensors/latest`);
-        if (res.status === 204) return; // backend chưa có dữ liệu nào
-
-        const data = await res.json();
-        $('last-updated').textContent = formatTime(new Date(data.timestamp));
-        connectionState.lastDataAt = new Date(data.timestamp).getTime();
-
-        readingState.temp = data.temp;
-        readingState.hum = data.hum;
-        readingState.light = data.light;
-        readingState.rain = data.rain;
-
-        addHistoryPoint('temp', data.temp);
-        addHistoryPoint('hum', data.hum);
-        addHistoryPoint('light', data.light);
-        addHistoryPoint('rain', data.rain);
-
-        updateCards(readingState);
-        renderChart();
-        checkAnomaly(readingState);
-        updateConnectionState();
-      } catch (err) {
-        console.error(err);
-        setConnectionState('warning', 'Lỗi kết nối server');
+        return { labels: data.labels, temp: data.temp, hum: data.hum, light: data.light, rain: data.rain };
       }
 
-        addHistoryPoint('temp', readingState.temp);
-        addHistoryPoint('hum', readingState.hum);
-        addHistoryPoint('light', readingState.light);
-        addHistoryPoint('rain', readingState.rain);
+      function applyHistory(data) {
+        historyState.labels = data.labels;
+        historyState.temp = data.temp;
+        historyState.hum = data.hum;
+        historyState.light = data.light;
+        historyState.rain = data.rain;
+      }
 
-        updateCards(readingState);
-        renderChart();
-        checkAnomaly(readingState);
-        updateConnectionState();
+      function formatLabel(iso, range) {
+        const d = new Date(iso);
+        const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        return range === '7d' ? `${d.getDate()}/${d.getMonth() + 1} ${hm}` : hm;
+      }
+      async function refreshData() {
+        try {
+          const res = await fetch(`${API_BASE}/api/sensors/latest`);
+          if (res.status === 204) return; // backend chưa có dữ liệu
+          if (!res.ok) throw new Error('Server lỗi ' + res.status);
+          const data = await res.json();
+
+          $('last-updated').textContent = formatTime(new Date(data.timestamp));
+          connectionState.lastDataAt = new Date(data.timestamp).getTime();
+          readingState.temp = data.temp;
+          readingState.hum = data.hum;
+          readingState.light = data.light;
+          readingState.rain = data.rain;
+
+          // 7 ngày có rất nhiều điểm nên chỉ tải lại khi bấm nút, không tải mỗi 10 giây
+          if (historyState.range !== '7d') applyHistory(await fetchHistory(historyState.range));
+
+          updateCards(readingState);
+          renderChart();
+          await loadAlerts();
+          updateConnectionState();
+        } catch (err) {
+          console.error(err);
+          setConnectionState('warning', 'Lỗi kết nối server');
+        }
       }
 
       function buildChartLabels(range) {
@@ -892,10 +939,10 @@
 
         const activeKey = historyState.active;
         const compareKey = historyState.compare ? (activeKey === 'temp' ? 'hum' : activeKey === 'hum' ? 'temp' : 'hum') : null;
-        const labels = buildChartLabels(historyState.range);
+        const labels = (historyState.labels || []).map((t) => formatLabel(t, historyState.range));
         const chart = canvas.__chart;
-        const activeData = historyState[activeKey].slice(-labels.length);
-        const comparison = compareKey ? historyState[compareKey].slice(-labels.length) : [];
+        const activeData = historyState[activeKey];
+        const comparison = compareKey ? historyState[compareKey] : [];
 
         chart.data.labels = labels;
         chart.data.datasets[0].label = chartMeta[activeKey].label;
@@ -938,8 +985,7 @@
   document.querySelectorAll('.range-button').forEach((el) => el.classList.toggle('active', el === button));
   try {
     const data = await fetchHistory(historyState.range);
-    historyState.temp = data.temp; historyState.hum = data.hum;
-    historyState.light = data.light; historyState.rain = data.rain;
+    applyHistory(data);
   } catch (err) { console.error(err); }
   renderChart();
 });
@@ -952,10 +998,7 @@
       async function initialize() {
   try {
     const initial = await fetchHistory('1h');
-    historyState.temp = initial.temp;
-    historyState.hum = initial.hum;
-    historyState.light = initial.light;
-    historyState.rain = initial.rain;
+    applyHistory(initial);
   } catch (err) {
     console.error('Không lấy được lịch sử ban đầu:', err);
   }
