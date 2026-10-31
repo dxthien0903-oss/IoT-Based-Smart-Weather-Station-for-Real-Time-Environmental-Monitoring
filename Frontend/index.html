@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Trạm Quan Trắc Thời Tiết IoT</title>
+    <title>IOT WEATHER STATION</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <style>
       :root {
@@ -82,16 +82,6 @@
         font-size: clamp(1.75rem, 2vw, 2.3rem);
         line-height: 1.2;
         letter-spacing: -0.04em;
-      }
-
-      .demo-badge {
-        padding: 5px 10px;
-        border-radius: 999px;
-        background: rgba(242, 169, 59, 0.15);
-        color: #f5d18a;
-        font-size: 0.68rem;
-        font-weight: 800;
-        letter-spacing: 0.12em;
       }
 
       .subtitle {
@@ -397,8 +387,7 @@
           <div class="brand-mark">◌</div>
           <div>
             <div class="title-row">
-              <h1>Trạm Quan Trắc Thời Tiết IoT</h1>
-              <span class="demo-badge">DEMO</span>
+              <h1>IOT WEATHER STATION</h1>
             </div>
             <p class="subtitle">Giám sát môi trường theo thời gian thực</p>
           </div>
@@ -421,7 +410,7 @@
         </div>
         <div class="device-item">
           <div class="label">Vị trí</div>
-          <div class="value">Khu công nghiệp A</div>
+          <div class="value" id="location-value" aria-live="polite">Đang lấy vị trí...</div>
         </div>
         <div class="device-item">
           <div class="label">Wi‑Fi</div>
@@ -546,7 +535,6 @@
             </svg>
             Cảnh báo bất thường
           </h2>
-          <span class="meta-label" id="ai-status">Module AI: chưa kết nối</span>
         </div>
         <div class="meta-label" id="last-check" hidden></div>
         <div class="alert-list" id="alert-list">
@@ -573,9 +561,38 @@
       const historyState = { temp: [], hum: [], light: [], rain: [], range: '1h', active: 'temp', compare: false };
       const readingState = { temp: 28.4, hum: 62, light: 540, rain: 0, lastTemp: null, lastHum: null, lastLight: null, lastRain: null };
       const connectionState = { lastDataAt: Date.now(), offlineThresholdMs: 30000 };
-      const aiState = { connected: false, hasChecked: false, lastCheck: null };
+      const aiState = { lastCheck: null };
       const $ = (id) => document.getElementById(id);
       const API_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : location.origin;
+
+      function startBrowserGeolocation() {
+        const locationValue = $('location-value');
+        if (!navigator.geolocation) {
+          locationValue.textContent = 'Trình duyệt không hỗ trợ định vị';
+          return;
+        }
+        if (!window.isSecureContext) {
+          locationValue.textContent = 'Cần HTTPS hoặc localhost';
+          return;
+        }
+
+        navigator.geolocation.watchPosition(
+          ({ coords }) => {
+            locationValue.textContent = `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
+            locationValue.title = `Độ chính xác khoảng ±${Math.round(coords.accuracy)} m`;
+          },
+          (error) => {
+            const messages = {
+              1: 'Chưa cấp quyền truy cập vị trí',
+              2: 'Không xác định được vị trí',
+              3: 'Hết thời gian chờ lấy vị trí'
+            };
+            locationValue.textContent = messages[error.code] || 'Không thể lấy vị trí';
+            locationValue.removeAttribute('title');
+          },
+          { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 }
+        );
+      }
 
       function addHistoryPoint(key, value) {
         historyState[key].push(value);
@@ -688,14 +705,11 @@
       }
 
       function setAiState() {
-        const status = $('ai-status');
         const last = $('last-check');
-        if (aiState.hasChecked) {
-          status.textContent = aiState.connected ? 'Module AI: quy tắc demo' : 'Module AI: quy tắc demo';
+        if (aiState.lastCheck) {
           last.hidden = false;
-          last.textContent = `Lần kiểm tra gần nhất: ${formatTime(aiState.lastCheck || new Date())}`;
+          last.textContent = `Lần kiểm tra gần nhất: ${formatTime(aiState.lastCheck)}`;
         } else {
-          status.textContent = 'Module AI: chưa kết nối';
           last.hidden = true;
           last.textContent = '';
         }
@@ -739,8 +753,6 @@
       }
 
       function checkAnomaly(data) {
-        aiState.connected = false;
-        aiState.hasChecked = true;
         aiState.lastCheck = new Date();
         setAiState();
 
@@ -811,8 +823,6 @@
         if (!res.ok) throw new Error('Không lấy được cảnh báo');
         const alerts = await res.json();
 
-        aiState.connected = true;
-        aiState.hasChecked = true;
         aiState.lastCheck = new Date();
         setAiState();
 
@@ -996,6 +1006,8 @@
       });
 
       async function initialize() {
+  startBrowserGeolocation();
+
   try {
     const initial = await fetchHistory('1h');
     applyHistory(initial);
