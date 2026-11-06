@@ -1,16 +1,29 @@
 // server.js
 // Backend cho Trạm Quan Trắc Thời Tiết IoT
 // Nhận dữ liệu từ ESP8266, lưu SQLite, cung cấp API cho dashboard frontend.
+// Tích hợp Google Gemini AI cho chatbot trợ lý thời tiết.
 
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const Database = require('better-sqlite3');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.DEVICE_API_KEY || 'demo-key-change-me'; // ESP8266 phải gửi đúng key này
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const OFFLINE_THRESHOLD_MS = 30 * 1000; // khớp với connectionState.offlineThresholdMs ở frontend
+
+// ---------- Google Gemini AI ----------
+let geminiModel = null;
+if (GEMINI_API_KEY) {
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  console.log('Gemini AI đã được kích hoạt.');
+} else {
+  console.warn('GEMINI_API_KEY chưa được cấu hình. Chatbot AI sẽ không hoạt động.');
+}
 
 // ---------- Database ----------
 const db = new Database(path.join(__dirname, 'weather.db'));
@@ -197,6 +210,93 @@ app.get('/api/sensors/history', (req, res) => {
        .all(limit);
      res.json(rows);
    });
+// ---------- POST /api/chat  (Chatbot AI dùng Gemini) ----------
+app.post('/api/chat', async (req, res) => {
+  const { message } = req.body || {};
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'Vui lòng nhập câu hỏi.' });
+  }
+
+  if (!geminiModel) {
+    return res.status(503).json({ error: 'AI chưa được cấu hình. Vui lòng thêm GEMINI_API_KEY vào file .env' });
+  }
+
+  try {
+    // Lấy dữ liệu cảm biến mới nhất để cung cấp ngữ cảnh cho AI
+    const latest = latestReading.get();
+    const recentAlerts = db.prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT 5').all();
+    const recentData = db.prepare('SELECT temp, hum, light, rain, created_at FROM readings ORDER BY created_at DESC LIMIT 20').all();
+
+    // Tính toán thống kê nhanh
+    let stats = '';
+    if (recentData.length > 0) {
+      const temps = recentData.map(r => r.temp);
+      const hums = recentData.map(r => r.hum);
+      const lights = recentData.map(r => r.light);
+      stats = `
+Thống kê 20 lần đo gần nhất:
+- Nhiệt độ: min ${Math.min(...temps).toFixed(1)}°C, max ${Math.max(...temps).toFixed(1)}°C, trung bình ${(temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1)}°C
+- Độ ẩm: min ${Math.min(...hums).toFixed(0)}%, max ${Math.max(...hums).toFixed(0)}%, trung bình ${(hums.reduce((a, b) => a + b, 0) / hums.length).toFixed(0)}%
+- Ánh sáng: min ${Math.min(...lights).toFixed(0)} lux, max ${Math.max(...lights).toFixed(0)} lux, trung bình ${(lights.reduce((a, b) => a + b, 0) / lights.length).toFixed(0)} lux`;
+    }
+
+    const sensorContext = latest
+      ? `Dữ liệu cảm biến MỚI NHẤT (${latest.created_at}):
+- Nhiệt độ: ${latest.temp}°C
+- Độ ẩm: ${latest.hum}%
+- Ánh sáng: ${latest.light} lux
+- Mưa: ${latest.rain ? 'Có mưa' : 'Không mưa'}
+- Thiết bị: ${latest.device_id}
+- RSSI (WiFi): ${latest.rssi} dBm
+${stats}`
+      : 'Chưa có dữ liệu cảm biến nào.';
+
+    const alertContext = recentAlerts.length > 0
+      ? `Cảnh báo bất thường gần đây:\n${recentAlerts.map(a =>
+          `- [${a.severity}] ${a.reason}: ${a.value} (kỳ vọng: ${a.expected || 'N/A'}) lúc ${a.created_at}`
+        ).join('\n')}`
+      : 'Không có cảnh báo bất thường nào gần đây.';
+
+    const systemPrompt = `Bạn là trợ lý AI chuyên về thời tiết và môi trường, được tích hợp trong hệ thống IoT Weather Station (Trạm Quan Trắc Thời Tiết IoT).
+
+Vai trò của bạn:
+1. Phân tích và giải thích dữ liệu cảm biến thời gian thực
+2. Đưa ra nhận xét, đánh giá về điều kiện thời tiết hiện tại
+3. Cảnh báo khi có dữ liệu bất thường
+4. Đưa ra lời khuyên về sức khỏe, hoạt động phù hợp với thời tiết
+5. Giải thích các khái niệm về thời tiết, IoT cho sinh viên
+6. Trả lời câu hỏi liên quan đến đồ án, hệ thống
+
+Quy tắc:
+- Trả lời bằng tiếng Việt
+- Ngắn gọn, dễ hiểu, thân thiện
+- Sử dụng emoji phù hợp
+- Dựa trên dữ liệu thực tế từ cảm biến khi có
+- Nếu không có dữ liệu, nói rõ là chưa có và vẫn trả lời chung
+
+DỮ LIỆU HỆ THỐNG HIỆN TẠI:
+${sensorContext}
+
+${alertContext}`;
+
+    const result = await geminiModel.generateContent({
+      contents: [
+        { role: 'user', parts: [{ text: systemPrompt + '\n\nCâu hỏi của người dùng: ' + message.trim() }] }
+      ],
+      generationConfig: {
+        maxOutputTokens: 1024,
+        temperature: 0.7,
+      },
+    });
+
+    const reply = result.response.text();
+    res.json({ reply });
+  } catch (err) {
+    console.error('Gemini API error:', err);
+    res.status(500).json({ error: 'Lỗi khi gọi AI. Vui lòng thử lại sau.' });
+  }
+});
+
 // ---------- Health check ----------
 app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
