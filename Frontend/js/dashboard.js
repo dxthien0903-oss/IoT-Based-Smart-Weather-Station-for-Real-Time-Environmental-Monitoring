@@ -1,28 +1,35 @@
-// dashboard.js — Logic cho trang Dashboard chính
+// dashboard.js — Logic cho trang Dashboard chính (production-ready)
 (function () {
   'use strict';
 
-  const formatTime = (d = new Date()) => {
-    return [d.getHours(), d.getMinutes(), d.getSeconds()].map(v => String(v).padStart(2, '0')).join(':');
+  var formatTime = function (d) {
+    d = d || new Date();
+    return [d.getHours(), d.getMinutes(), d.getSeconds()].map(function (v) { return String(v).padStart(2, '0'); }).join(':');
   };
 
-  const chartMeta = {
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  var chartMeta = {
     temp: { label: 'Nhiệt độ', unit: '°C', color: '#ef9169' },
     hum: { label: 'Độ ẩm', unit: '%', color: '#6fb8d6' },
     light: { label: 'Ánh sáng', unit: 'lux', color: '#edd066' },
     rain: { label: 'Mưa', unit: '', color: '#7fb897' }
   };
 
-  const MAX_HISTORY_POINTS = 72;
-  const historyState = { temp: [], hum: [], light: [], rain: [], range: '1h', active: 'temp', compare: false };
-  const readingState = { temp: 28.4, hum: 62, light: 540, rain: 0, lastTemp: null, lastHum: null, lastLight: null, lastRain: null };
-  const connectionState = { lastDataAt: Date.now(), offlineThresholdMs: 30000 };
-  const aiState = { lastCheck: null };
-  const $ = (id) => document.getElementById(id);
-  const API_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : location.origin;
+  var historyState = { temp: [], hum: [], light: [], rain: [], labels: [], range: '1h', active: 'temp', compare: false };
+  var readingState = { temp: null, hum: null, light: null, rain: null, lastTemp: null, lastHum: null, lastLight: null, lastRain: null };
+  var connectionState = { lastDataAt: 0, hasData: false, offlineThresholdMs: 30000 };
+  var pageLoadedAt = Date.now();
+  var aiState = { lastCheck: null };
+  function $(id) { return document.getElementById(id); }
+  var API_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : location.origin;
 
   function startBrowserGeolocation() {
-    const locationValue = $('location-value');
+    var locationValue = $('location-value');
     if (!navigator.geolocation) {
       locationValue.textContent = 'Trình duyệt không hỗ trợ định vị';
       return;
@@ -31,18 +38,14 @@
       locationValue.textContent = 'Cần HTTPS hoặc localhost';
       return;
     }
-
     navigator.geolocation.watchPosition(
-      ({ coords }) => {
-        locationValue.textContent = `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
-        locationValue.title = `Độ chính xác khoảng ±${Math.round(coords.accuracy)} m`;
+      function (pos) {
+        var c = pos.coords;
+        locationValue.textContent = c.latitude.toFixed(5) + ', ' + c.longitude.toFixed(5);
+        locationValue.title = 'Độ chính xác khoảng ±' + Math.round(c.accuracy) + ' m';
       },
-      (error) => {
-        const messages = {
-          1: 'Chưa cấp quyền truy cập vị trí',
-          2: 'Không xác định được vị trí',
-          3: 'Hết thời gian chờ lấy vị trí'
-        };
+      function (error) {
+        var messages = { 1: 'Chưa cấp quyền truy cập vị trí', 2: 'Không xác định được vị trí', 3: 'Hết thời gian chờ lấy vị trí' };
         locationValue.textContent = messages[error.code] || 'Không thể lấy vị trí';
         locationValue.removeAttribute('title');
       },
@@ -50,65 +53,77 @@
     );
   }
 
-  function addHistoryPoint(key, value) {
-    historyState[key].push(value);
-    if (historyState[key].length > MAX_HISTORY_POINTS) {
-      historyState[key].shift();
-    }
-  }
-
   function setBadge(id, state) {
-    const el = $(id);
+    var el = $(id);
+    if (!el) return;
     if (state === 'pending') {
       el.textContent = 'Đang chờ';
       el.className = 'status-badge pending';
       return;
     }
     el.textContent = state === 'abnormal' ? 'Bất thường' : 'Bình thường';
-    el.className = `status-badge ${state}`;
+    el.className = 'status-badge ' + state;
   }
 
   function setTrend(elementId, current, previous, unit) {
-    const el = document.getElementById(elementId);
-    if (previous == null || !Number.isFinite(previous)) {
+    var el = document.getElementById(elementId);
+    if (previous == null || !Number.isFinite(previous) || current == null || !Number.isFinite(current)) {
       el.textContent = '—';
       el.className = 'trend';
       return;
     }
-    const delta = current - previous;
+    var delta = current - previous;
     if (Math.abs(delta) < 0.05) {
       el.textContent = 'Ổn định so với lần trước';
       el.className = 'trend';
       return;
     }
-    const direction = delta > 0 ? 'up' : 'down';
-    const sign = delta > 0 ? '+' : '-';
-    el.textContent = `${direction === 'up' ? '↑' : '↓'} ${sign}${Math.abs(delta).toFixed(1)}${unit} so với lần trước`;
-    el.className = `trend ${direction}`;
+    var direction = delta > 0 ? 'up' : 'down';
+    var sign = delta > 0 ? '+' : '-';
+    el.textContent = (direction === 'up' ? '↑' : '↓') + ' ' + sign + Math.abs(delta).toFixed(1) + unit + ' so với lần trước';
+    el.className = 'trend ' + direction;
   }
 
   function updateSparkline(svgId, values, color) {
-    const svg = document.getElementById(svgId);
+    var svg = document.getElementById(svgId);
+    if (!svg) return;
     if (!values.length) { svg.innerHTML = ''; return; }
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const range = max - min || 1;
-    const points = values.map((value, index) => {
-      const x = (index / Math.max(values.length - 1, 1)) * 100;
-      const y = 38 - ((value - min) / range) * 30 - 4;
-      return `${x},${y}`;
+    var min = Math.min.apply(null, values);
+    var max = Math.max.apply(null, values);
+    var range = max - min || 1;
+    var points = values.map(function (value, index) {
+      var x = (index / Math.max(values.length - 1, 1)) * 100;
+      var y = 38 - ((value - min) / range) * 30 - 4;
+      return x + ',' + y;
     }).join(' ');
 
-    svg.innerHTML = `
-      <defs>
-        <linearGradient id="grad-${svgId}" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stop-color="${color}" stop-opacity="0.35"></stop>
-          <stop offset="100%" stop-color="${color}" stop-opacity="0.02"></stop>
-        </linearGradient>
-      </defs>
-      <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></polyline>
-      <polyline points="0,38 ${points} 100,38" fill="url(#grad-${svgId})" stroke="none"></polyline>
-    `;
+    svg.innerHTML =
+      '<defs><linearGradient id="grad-' + svgId + '" x1="0" x2="0" y1="0" y2="1">' +
+      '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.35"></stop>' +
+      '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"></stop>' +
+      '</linearGradient></defs>' +
+      '<polyline points="' + points + '" fill="none" stroke="' + color + '" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></polyline>' +
+      '<polyline points="0,38 ' + points + ' 100,38" fill="url(#grad-' + svgId + ')" stroke="none"></polyline>';
+  }
+
+  function updateDeviceMeta(data) {
+    if (data.device_id) $('device-id').textContent = data.device_id;
+    if (typeof data.rssi === 'number') {
+      $('rssi').textContent = data.rssi + ' dBm';
+      var bars = document.querySelector('.quality-bars');
+      if (bars) {
+        bars.className = 'quality-bars ' + (data.rssi >= -60 ? 'good' : data.rssi >= -75 ? 'weak' : 'weak');
+        bars.style.opacity = data.rssi < -85 ? '0.5' : '1';
+      }
+    } else {
+      $('rssi').textContent = '--';
+    }
+  }
+
+  function tickUptime() {
+    var s = Math.floor((Date.now() - pageLoadedAt) / 1000);
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    $('uptime').textContent = h + 'h ' + String(m).padStart(2, '0') + 'm';
   }
 
   function updateCards(data) {
@@ -121,22 +136,23 @@
     setTrend('trend-temp', data.temp, readingState.lastTemp, '°C');
     setTrend('trend-hum', data.hum, readingState.lastHum, '%');
     setTrend('trend-light', data.light, readingState.lastLight, ' lux');
-    $('trend-rain').textContent = data.rain !== readingState.lastRain ? (data.rain ? '↑ có mưa' : '↓ không mưa') : 'Ổn định';
-    $('trend-rain').className = 'trend';
+    var rainTrend = $('trend-rain');
+    if (readingState.lastRain == null) { rainTrend.textContent = '—'; }
+    else if (data.rain !== readingState.lastRain) { rainTrend.textContent = data.rain ? '↑ có mưa' : '↓ không mưa'; }
+    else { rainTrend.textContent = 'Ổn định'; }
+    rainTrend.className = 'trend';
 
-    const tempValues = historyState.temp.slice(-12);
-    const humValues = historyState.hum.slice(-12);
-    const lightValues = historyState.light.slice(-12);
-    const tempMin = Math.min(...tempValues);
-    const tempMax = Math.max(...tempValues);
-    const humMin = Math.min(...humValues);
-    const humMax = Math.max(...humValues);
-    const lightMin = Math.min(...lightValues);
-    const lightMax = Math.max(...lightValues);
-
-    $('range-temp').textContent = Number.isFinite(tempMin) ? `Hôm nay: ${tempMin.toFixed(1)}–${tempMax.toFixed(1)}°C` : 'Hôm nay: --';
-    $('range-hum').textContent = Number.isFinite(humMin) ? `Hôm nay: ${humMin.toFixed(0)}–${humMax.toFixed(0)}%` : 'Hôm nay: --';
-    $('range-light').textContent = Number.isFinite(lightMin) ? `Hôm nay: ${lightMin.toFixed(0)}–${lightMax.toFixed(0)} lux` : 'Hôm nay: --';
+    var tempValues = historyState.temp.slice(-12);
+    var humValues = historyState.hum.slice(-12);
+    var lightValues = historyState.light.slice(-12);
+    function minMax(arr, digits, suffix, prefix) {
+      if (!arr.length) return prefix + ': --';
+      var mn = Math.min.apply(null, arr), mx = Math.max.apply(null, arr);
+      return prefix + ': ' + mn.toFixed(digits) + '–' + mx.toFixed(digits) + suffix;
+    }
+    $('range-temp').textContent = minMax(tempValues, 1, '°C', 'Hôm nay');
+    $('range-hum').textContent = minMax(humValues, 0, '%', 'Hôm nay');
+    $('range-light').textContent = minMax(lightValues, 0, ' lux', 'Hôm nay');
     $('range-rain').textContent = data.rain ? 'Cảm biến: ướt' : 'Cảm biến: khô';
 
     $('summary-temp').textContent = data.temp > 31 ? 'Nhiệt độ cao, cần kiểm tra tủ nhiệt' : data.temp < 21 ? 'Mát hơn so với mức trung bình' : 'Nhiệt độ ở mức ổn định';
@@ -144,10 +160,13 @@
     $('summary-light').textContent = data.light > 700 ? 'Ánh sáng mạnh, môi trường khá sáng' : data.light < 150 ? 'Môi trường tối, kiểm tra đèn' : 'Ánh sáng ở mức vừa phải';
     $('summary-rain').textContent = data.rain ? 'Phát hiện bề mặt ẩm, có khả năng mưa' : 'Bề mặt khô, không phát hiện mưa';
 
-    setBadge('badge-temp', data.temp > 35 ? 'abnormal' : 'normal');
-    setBadge('badge-hum', data.hum > 82 ? 'abnormal' : 'normal');
-    setBadge('badge-light', data.light < 80 ? 'abnormal' : 'normal');
+    // Badge mặc định: normal — loadAlerts() sẽ nâng lên abnormal nếu có cảnh báo < 60s
+    setBadge('badge-temp', 'normal');
+    setBadge('badge-hum', 'normal');
+    setBadge('badge-light', 'normal');
     setBadge('badge-rain', 'normal');
+
+    updateDeviceMeta(data);
 
     readingState.lastTemp = data.temp;
     readingState.lastHum = data.hum;
@@ -161,10 +180,10 @@
   }
 
   function setAiState() {
-    const last = $('last-check');
+    var last = $('last-check');
     if (aiState.lastCheck) {
       last.hidden = false;
-      last.textContent = `Lần kiểm tra gần nhất: ${formatTime(aiState.lastCheck)}`;
+      last.textContent = 'Lần kiểm tra gần nhất: ' + formatTime(aiState.lastCheck);
     } else {
       last.hidden = true;
       last.textContent = '';
@@ -172,31 +191,13 @@
   }
 
   function showAlertList(message) {
-    const list = $('alert-list');
-    list.innerHTML = `<div class="empty-state">${message}</div>`;
-  }
-
-  function addAlert(sensor, value, threshold, message, severity) {
-    const list = $('alert-list');
-    const empty = list.querySelector('.empty-state');
-    if (empty) empty.remove();
-    const row = document.createElement('div');
-    row.className = 'alert-item';
-    row.innerHTML = `
-      <div class="time">${formatTime()}</div>
-      <div>
-        <div class="message">${message}</div>
-        <span class="meta">Cảm biến: ${sensor} · Giá trị: ${value} · Ngưỡng: ${threshold}</span>
-      </div>
-      <span class="alert-tag">${severity}</span>
-    `;
-    list.prepend(row);
-    while (list.children.length > 5) list.removeChild(list.lastChild);
+    var list = $('alert-list');
+    list.innerHTML = '<div class="empty-state">' + escapeHtml(message) + '</div>';
   }
 
   function showBanner(text) {
-    const banner = $('ai-banner');
-    const textNode = $('ai-banner-text');
+    var banner = $('ai-banner');
+    var textNode = $('ai-banner-text');
     if (!text) {
       banner.classList.remove('show');
       textNode.textContent = '';
@@ -205,11 +206,11 @@
     textNode.textContent = text;
     banner.classList.add('show');
     clearTimeout(showBanner.tid);
-    showBanner.tid = setTimeout(() => banner.classList.remove('show'), 7000);
+    showBanner.tid = setTimeout(function () { banner.classList.remove('show'); }, 7000);
   }
 
   function setConnectionState(state, label) {
-    const pill = $('connection-pill');
+    var pill = $('connection-pill');
     pill.classList.remove('warning', 'pending');
     if (state === 'warning') pill.classList.add('warning');
     if (state === 'pending') pill.classList.add('pending');
@@ -217,81 +218,90 @@
   }
 
   function updateConnectionState() {
-    const now = Date.now();
-    const isOffline = now - connectionState.lastDataAt > connectionState.offlineThresholdMs;
-    if (isOffline) {
-      setConnectionState('warning', 'Mất kết nối');
-    } else {
-      setConnectionState('online', 'Đã kết nối');
+    if (!connectionState.hasData) {
+      setConnectionState('pending', 'Đang chờ dữ liệu');
+      return;
     }
+    var isOffline = Date.now() - connectionState.lastDataAt > connectionState.offlineThresholdMs;
+    if (isOffline) setConnectionState('warning', 'Mất kết nối');
+    else setConnectionState('online', 'Đã kết nối');
   }
 
   function setCompareButton() {
-    const compareMap = {
-      temp: 'Độ ẩm',
-      hum: 'Nhiệt độ',
-      light: 'Độ ẩm',
-      rain: 'Độ ẩm'
-    };
-    const compareTarget = compareMap[historyState.active] || 'Độ ẩm';
-    const btn = $('compare-btn');
-    const text = btn.querySelector('span');
-    const isPressed = historyState.compare;
+    var compareMap = { temp: 'Độ ẩm', hum: 'Nhiệt độ', light: 'Độ ẩm', rain: 'Độ ẩm' };
+    var compareTarget = compareMap[historyState.active] || 'Độ ẩm';
+    var btn = $('compare-btn');
+    var text = btn.querySelector('span');
+    var isPressed = historyState.compare;
     btn.classList.toggle('active', isPressed);
     btn.setAttribute('aria-pressed', String(isPressed));
-    text.textContent = isPressed ? `Tắt so sánh với ${compareTarget}` : `So sánh với ${compareTarget}`;
+    text.textContent = isPressed ? 'Tắt so sánh với ' + compareTarget : 'So sánh với ' + compareTarget;
   }
 
-  const SENSOR_LABEL = { temp: 'Nhiệt độ', hum: 'Độ ẩm', light: 'Ánh sáng' };
-  const SENSOR_UNIT = { temp: '°C', hum: '%', light: ' lux' };
-  const SEVERITY_LABEL = { high: 'Cao', medium: 'Trung bình', low: 'Thấp' };
+  var SENSOR_LABEL = { temp: 'Nhiệt độ', hum: 'Độ ẩm', light: 'Ánh sáng' };
+  var SENSOR_UNIT = { temp: '°C', hum: '%', light: ' lux' };
+  var SEVERITY_LABEL = { high: 'Cao', medium: 'Trung bình', low: 'Thấp' };
 
-  async function loadAlerts() {
-    const res = await fetch(`${API_BASE}/api/alerts?limit=20`);
-    if (!res.ok) throw new Error('Không lấy được cảnh báo');
-    const alerts = await res.json();
+  function loadAlerts() {
+    return fetch(API_BASE + '/api/alerts?limit=20').then(function (res) {
+      if (!res.ok) throw new Error('Không lấy được cảnh báo');
+      return res.json();
+    }).then(function (alerts) {
+      aiState.lastCheck = new Date();
+      setAiState();
 
-    aiState.lastCheck = new Date();
-    setAiState();
+      var list = $('alert-list');
+      list.innerHTML = '';
+      if (!alerts.length) showAlertList('Chưa phát hiện bất thường');
 
-    const list = $('alert-list');
-    list.innerHTML = '';
-    if (!alerts.length) showAlertList('Chưa phát hiện bất thường');
+      alerts.forEach(function (a) {
+        var d = new Date(a.created_at);
+        var unit = SENSOR_UNIT[a.sensor] || '';
+        var row = document.createElement('div');
+        row.className = 'alert-item';
+        var timeDiv = document.createElement('div');
+        timeDiv.className = 'time';
+        timeDiv.textContent = d.getDate() + '/' + (d.getMonth() + 1) + ' ' + formatTime(d);
+        var bodyDiv = document.createElement('div');
+        var msgDiv = document.createElement('div');
+        msgDiv.className = 'message';
+        msgDiv.textContent = a.reason;
+        var metaSpan = document.createElement('span');
+        metaSpan.className = 'meta';
+        metaSpan.textContent = 'Cảm biến: ' + (SENSOR_LABEL[a.sensor] || a.sensor) + ' · Giá trị: ' + a.value + unit + ' · Kỳ vọng: ' + (a.expected || '—');
+        bodyDiv.appendChild(msgDiv);
+        bodyDiv.appendChild(metaSpan);
+        var tag = document.createElement('span');
+        tag.className = 'alert-tag';
+        tag.textContent = SEVERITY_LABEL[a.severity] || a.severity;
+        row.appendChild(timeDiv);
+        row.appendChild(bodyDiv);
+        row.appendChild(tag);
+        list.appendChild(row);
+      });
 
-    alerts.forEach((a) => {
-      const d = new Date(a.created_at);
-      const unit = SENSOR_UNIT[a.sensor] || '';
-      const row = document.createElement('div');
-      row.className = 'alert-item';
-      row.innerHTML = `
-        <div class="time">${d.getDate()}/${d.getMonth() + 1} ${formatTime(d)}</div>
-        <div>
-          <div class="message">${a.reason}</div>
-          <span class="meta">Cảm biến: ${SENSOR_LABEL[a.sensor] || a.sensor} · Giá trị: ${a.value}${unit} · Kỳ vọng: ${a.expected || '—'}</span>
-        </div>
-        <span class="alert-tag">${SEVERITY_LABEL[a.severity] || a.severity}</span>
-      `;
-      list.appendChild(row);
+      var now = Date.now();
+      ['temp', 'hum', 'light'].forEach(function (k) {
+        var recent = alerts.some(function (a) { return a.sensor === k && now - new Date(a.created_at).getTime() < 60000; });
+        setBadge('badge-' + k, recent ? 'abnormal' : 'normal');
+      });
+      setBadge('badge-rain', 'normal');
+
+      var fresh = null;
+      for (var i = 0; i < alerts.length; i++) {
+        if (now - new Date(alerts[i].created_at).getTime() < 20000) { fresh = alerts[i]; break; }
+      }
+      showBanner(fresh ? fresh.reason + ': ' + fresh.value + (SENSOR_UNIT[fresh.sensor] || '') : '');
     });
-
-    // Badge trên thẻ chỉ báo "Bất thường" nếu có cảnh báo trong 60 giây gần nhất
-    const now = Date.now();
-    ['temp', 'hum', 'light'].forEach((k) => {
-      const recent = alerts.some((a) => a.sensor === k && now - new Date(a.created_at).getTime() < 60000);
-      setBadge(`badge-${k}`, recent ? 'abnormal' : 'normal');
-    });
-    setBadge('badge-rain', 'normal');
-
-    // Banner chỉ hiện với cảnh báo rất mới (dưới 20 giây)
-    const fresh = alerts.find((a) => now - new Date(a.created_at).getTime() < 20000);
-    showBanner(fresh ? `${fresh.reason}: ${fresh.value}${SENSOR_UNIT[fresh.sensor] || ''}` : '');
   }
 
-  async function fetchHistory(range) {
-    const res = await fetch(`${API_BASE}/api/sensors/history?range=${range}`);
-    if (!res.ok) throw new Error('Không lấy được lịch sử');
-    const data = await res.json();
-    return { labels: data.labels, temp: data.temp, hum: data.hum, light: data.light, rain: data.rain };
+  function fetchHistory(range) {
+    return fetch(API_BASE + '/api/sensors/history?range=' + encodeURIComponent(range)).then(function (res) {
+      if (!res.ok) throw new Error('Không lấy được lịch sử');
+      return res.json();
+    }).then(function (data) {
+      return { labels: data.labels || [], temp: data.temp || [], hum: data.hum || [], light: data.light || [], rain: data.rain || [] };
+    });
   }
 
   function applyHistory(data) {
@@ -303,56 +313,48 @@
   }
 
   function formatLabel(iso, range) {
-    const d = new Date(iso);
-    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    return range === '7d' ? `${d.getDate()}/${d.getMonth() + 1} ${hm}` : hm;
+    var d = new Date(iso);
+    var hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    return range === '7d' ? d.getDate() + '/' + (d.getMonth() + 1) + ' ' + hm : hm;
   }
 
-  async function refreshData() {
-    try {
-      const res = await fetch(`${API_BASE}/api/sensors/latest`);
-      if (res.status === 204) return;
+  var refreshing = false;
+  function refreshData() {
+    if (refreshing) return Promise.resolve();
+    refreshing = true;
+    return fetch(API_BASE + '/api/sensors/latest').then(function (res) {
+      if (res.status === 204) { updateConnectionState(); return; }
       if (!res.ok) throw new Error('Server lỗi ' + res.status);
-      const data = await res.json();
-
+      return res.json();
+    }).then(function (data) {
+      if (!data) return;
       $('last-updated').textContent = formatTime(new Date(data.timestamp));
       connectionState.lastDataAt = new Date(data.timestamp).getTime();
+      connectionState.hasData = true;
       readingState.temp = data.temp;
       readingState.hum = data.hum;
       readingState.light = data.light;
       readingState.rain = data.rain;
-
-      if (historyState.range !== '7d') applyHistory(await fetchHistory(historyState.range));
-
-      updateCards(readingState);
-      renderChart();
-      await loadAlerts();
-      updateConnectionState();
-    } catch (err) {
+      return fetchHistory(historyState.range).then(function (h) {
+        applyHistory(h);
+        updateCards(readingState);
+        renderChart();
+        return loadAlerts().catch(function (e) { console.error(e); });
+      }).then(updateConnectionState);
+    }).catch(function (err) {
       console.error(err);
       setConnectionState('warning', 'Lỗi kết nối server');
-    }
-  }
-
-  function buildChartLabels(range) {
-    const now = new Date();
-    const length = range === '1h' ? 24 : range === '6h' ? 28 : range === '24h' ? 36 : 30;
-    const labels = [];
-    for (let index = length - 1; index >= 0; index -= 1) {
-      const d = new Date(now.getTime() - index * 5 * 60 * 1000);
-      if (range === '7d') labels.push(`${d.getDate()}/${d.getMonth() + 1}`);
-      else labels.push(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
-    }
-    return labels;
+    }).then(function () { refreshing = false; });
   }
 
   function renderChart() {
-    const canvas = document.getElementById('history-chart');
+    if (typeof Chart === 'undefined') return; // CDN chưa tải — bỏ qua, tránh crash
+    var canvas = document.getElementById('history-chart');
     if (!canvas.__chart) {
       canvas.__chart = new Chart(canvas, {
         type: 'line',
         data: {
-          labels: buildChartLabels(historyState.range),
+          labels: [],
           datasets: [
             { label: 'Nhiệt độ', data: [], borderColor: '#ef9169', backgroundColor: 'rgba(239,145,105,0.15)', borderWidth: 2.5, pointRadius: 0, tension: 0.35, fill: false, yAxisID: 'y' },
             { label: 'Độ ẩm', data: [], borderColor: '#6fb8d6', backgroundColor: 'rgba(111,184,214,0.12)', borderWidth: 2, pointRadius: 0, tension: 0.35, fill: false, yAxisID: 'y1', hidden: true }
@@ -364,10 +366,10 @@
           interaction: { mode: 'index', intersect: false },
           plugins: {
             legend: { display: true, labels: { color: '#d3dde4', usePointStyle: true, boxWidth: 10, boxHeight: 10, padding: 16 } },
-            tooltip: { callbacks: { label(context) { return `${context.dataset.label}: ${context.parsed.y}${context.dataset.unit || ''}`; } } }
+            tooltip: { callbacks: { label: function (context) { return context.dataset.label + ': ' + context.parsed.y + (context.dataset.unit || ''); } } }
           },
           scales: {
-            x: { grid: { color: 'rgba(211,221,228,0.12)' }, ticks: { color: '#d3dde4' }, title: { display: true, text: 'Thời gian', color: '#d3dde4' } },
+            x: { grid: { color: 'rgba(211,221,228,0.12)' }, ticks: { color: '#d3dde4', maxTicksLimit: 10 }, title: { display: true, text: 'Thời gian', color: '#d3dde4' } },
             y: { position: 'left', grid: { color: 'rgba(211,221,228,0.12)' }, ticks: { color: '#d3dde4' }, title: { display: true, text: 'Nhiệt độ (°C)', color: '#d3dde4' } },
             y1: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#d3dde4' }, title: { display: true, text: 'Độ ẩm (%)', color: '#d3dde4' } }
           }
@@ -375,43 +377,43 @@
       });
     }
 
-    const activeKey = historyState.active;
-    const compareKey = historyState.compare ? (activeKey === 'temp' ? 'hum' : activeKey === 'hum' ? 'temp' : 'hum') : null;
-    const labels = (historyState.labels || []).map((t) => formatLabel(t, historyState.range));
-    const chart = canvas.__chart;
-    const activeData = historyState[activeKey];
-    const comparison = compareKey ? historyState[compareKey] : [];
+    var activeKey = historyState.active;
+    var compareKey = historyState.compare ? (activeKey === 'temp' ? 'hum' : activeKey === 'hum' ? 'temp' : 'hum') : null;
+    var labels = (historyState.labels || []).map(function (t) { return formatLabel(t, historyState.range); });
+    var chart = canvas.__chart;
+    var activeData = historyState[activeKey] || [];
+    var comparison = compareKey ? historyState[compareKey] : [];
 
     chart.data.labels = labels;
     chart.data.datasets[0].label = chartMeta[activeKey].label;
     chart.data.datasets[0].unit = chartMeta[activeKey].unit;
     chart.data.datasets[0].data = activeData;
     chart.data.datasets[0].borderColor = chartMeta[activeKey].color;
-    chart.data.datasets[0].backgroundColor = `${chartMeta[activeKey].color}22`;
+    chart.data.datasets[0].backgroundColor = chartMeta[activeKey].color + '22';
     chart.data.datasets[0].hidden = false;
 
     chart.data.datasets[1].label = compareKey ? chartMeta[compareKey].label : 'Độ ẩm';
     chart.data.datasets[1].unit = compareKey ? chartMeta[compareKey].unit : '%';
     chart.data.datasets[1].data = comparison;
     chart.data.datasets[1].borderColor = compareKey ? chartMeta[compareKey].color : '#6fb8d6';
-    chart.data.datasets[1].backgroundColor = compareKey ? `${chartMeta[compareKey].color}22` : 'rgba(111,184,214,0.12)';
+    chart.data.datasets[1].backgroundColor = compareKey ? chartMeta[compareKey].color + '22' : 'rgba(111,184,214,0.12)';
     chart.data.datasets[1].hidden = !compareKey;
 
-    chart.options.scales.y.title.text = `${chartMeta[activeKey].label} (${chartMeta[activeKey].unit})`;
-    chart.options.scales.y1.title.text = compareKey ? `${chartMeta[compareKey].label} (${chartMeta[compareKey].unit})` : 'Độ ẩm (%)';
+    chart.options.scales.y.title.text = chartMeta[activeKey].label + ' (' + chartMeta[activeKey].unit + ')';
+    chart.options.scales.y1.title.text = compareKey ? chartMeta[compareKey].label + ' (' + chartMeta[compareKey].unit + ')' : 'Độ ẩm (%)';
     chart.options.scales.y1.display = !!compareKey;
     chart.update();
   }
 
   // ---------- Event listeners ----------
-  document.getElementById('refresh-btn').addEventListener('click', () => refreshData());
+  document.getElementById('refresh-btn').addEventListener('click', function () { refreshData(); });
 
-  document.getElementById('series-tabs').addEventListener('click', (event) => {
-    const button = event.target.closest('.tab-button');
+  document.getElementById('series-tabs').addEventListener('click', function (event) {
+    var button = event.target.closest('.tab-button');
     if (!button) return;
     historyState.active = button.dataset.key;
-    document.querySelectorAll('.tab-button').forEach((el) => {
-      const selected = el === button;
+    document.querySelectorAll('.tab-button').forEach(function (el) {
+      var selected = el === button;
       el.classList.toggle('active', selected);
       el.setAttribute('aria-selected', selected ? 'true' : 'false');
     });
@@ -419,46 +421,40 @@
     renderChart();
   });
 
-  document.getElementById('range-tabs').addEventListener('click', async (event) => {
-    const button = event.target.closest('.range-button');
+  document.getElementById('range-tabs').addEventListener('click', function (event) {
+    var button = event.target.closest('.range-button');
     if (!button) return;
     historyState.range = button.dataset.range;
-    document.querySelectorAll('.range-button').forEach((el) => el.classList.toggle('active', el === button));
-    try {
-      const data = await fetchHistory(historyState.range);
-      applyHistory(data);
-    } catch (err) { console.error(err); }
-    renderChart();
+    document.querySelectorAll('.range-button').forEach(function (el) { el.classList.toggle('active', el === button); });
+    fetchHistory(historyState.range).then(applyHistory).catch(function (err) { console.error(err); }).then(renderChart);
   });
 
-  document.getElementById('compare-btn').addEventListener('click', () => {
+  document.getElementById('compare-btn').addEventListener('click', function () {
     historyState.compare = !historyState.compare;
     setCompareButton();
     renderChart();
   });
 
   // ---------- Initialize ----------
-  async function initialize() {
+  function initialize() {
     startBrowserGeolocation();
-
-    try {
-      const initial = await fetchHistory('1h');
-      applyHistory(initial);
-    } catch (err) {
+    tickUptime();
+    setInterval(tickUptime, 30000);
+    setConnectionState('pending', 'Đang chờ dữ liệu');
+    fetchHistory('1h').then(applyHistory).catch(function (err) {
       console.error('Không lấy được lịch sử ban đầu:', err);
-    }
-
-    await refreshData();
-    setCompareButton();
-    setAiState();
+    }).then(refreshData).then(function () {
+      setCompareButton();
+      setAiState();
+    });
   }
 
   initialize();
-  setInterval(() => {
+  setInterval(function () {
     if (document.visibilityState === 'visible') {
       refreshData();
+    } else {
+      updateConnectionState();
     }
-    updateConnectionState();
   }, 10000);
 })();
-

@@ -33,7 +33,7 @@
       <section class="device-overview" aria-label="Thông tin thiết bị">
         <div class="device-item">
           <div class="label">Device ID</div>
-          <div class="value">ESP8266-WX01</div>
+          <div class="value" id="device-id">--</div>
         </div>
         <div class="device-item">
           <div class="label">Vị trí</div>
@@ -43,18 +43,18 @@
           <div class="label">Wi‑Fi</div>
           <div class="value">
             <span class="quality-bars good" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
-            <span id="rssi">-52 dBm</span>
+            <span id="rssi">--</span>
           </div>
         </div>
         <div class="device-item">
           <div class="label">Uptime</div>
-          <div class="value" id="uptime">18h 42m</div>
+          <div class="value" id="uptime">--</div>
         </div>
       </section>
 
       <div class="ai-banner" id="ai-banner" aria-live="polite">
         <span class="icon">⚠</span>
-        <span id="ai-banner-text">Cảnh báo đánh giá từ mô hình AI</span>
+        <span id="ai-banner-text">Cảnh báo bất thường từ hệ thống</span>
       </div>
 
       <section class="stats-grid" aria-label="Chỉ số môi trường">
@@ -169,7 +169,7 @@
         </div>
       </section>
 
-      <footer class="page-footer">Dữ liệu demo cho mục đích trình diễn giao diện.</footer>
+      <footer class="page-footer">IoT Weather Station · ESP8266 + Node.js + SQLite · Dữ liệu cập nhật mỗi 10 giây.</footer>
     </div>
 
     <!-- ===== Floating AI Chat Widget ===== -->

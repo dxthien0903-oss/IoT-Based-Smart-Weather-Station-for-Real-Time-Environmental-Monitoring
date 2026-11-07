@@ -76,9 +76,13 @@ biểu đồ và cảnh báo.
 ```
 IoT-Based-Smart-Weather-Station-for-Real-Time-Environmental-Monitoring/
 ├── README.md                      Tài liệu này
-├── .gitignore
+├── .gitignore                     Chặn .env, secrets.h, *.db, node_modules
 ├── Frontend/
-│   └── index.html                 Dashboard (HTML + CSS + JS)
+│   ├── index.html                 Dashboard (HTML + CSS + JS)
+│   ├── css/style.css              Giao diện (design tokens, responsive)
+│   └── js/
+│       ├── dashboard.js           Logic dashboard: dữ liệu, biểu đồ, cảnh báo
+│       └── chatwidget.js          Widget chatbot AI nổi
 └── Backend/
     ├── server.js                  Server Express + SQLite
     ├── simulate.js                Giả lập ESP8266 khi chưa có phần cứng
@@ -210,6 +214,10 @@ hiện bất thường, cung cấp API cho dashboard và phục vụ thư mục 
 |---|---|---|
 | `DEVICE_API_KEY` | `demo-key-change-me` | "Mật khẩu" cho thiết bị gửi dữ liệu. Phải **giống hệt** `DEVICE_API_KEY` trong `secrets.h` của ESP8266. `simulate.js` tự đọc giá trị này từ `.env` |
 | `PORT` | `3000` | Cổng chạy server |
+| `GEMINI_API_KEY` | (rỗng) | Khóa Google Gemini cho chatbot. Bỏ trống thì `/api/chat` trả `503` |
+| `OFFLINE_THRESHOLD_MS` | `30000` | Ngưỡng coi thiết bị là offline. Khớp với `connectionState.offlineThresholdMs` ở frontend |
+| `CORS_ORIGIN` | `*` | Cho phép origin gọi API. **Production: đặt domain dashboard**, ví dụ `https://weather.example.com` |
+| `DATA_RETENTION_DAYS` | `30` | Số ngày giữ dữ liệu đo. Cũ hơn sẽ tự xóa mỗi 6 giờ |
 
 ### 6.2. API ghi dữ liệu (ESP8266 gửi lên)
 
@@ -243,9 +251,12 @@ Body mẫu:
 
 | Mã phản hồi | Ý nghĩa |
 |---|---|
-| `201` | Đã lưu thành công |
+| `201` | Đã lưu thành công (`{"ok":true,"alerts":0}`) |
 | `400` | Dữ liệu sai định dạng (thiếu trường, không phải số, `rain` khác 0/1) |
 | `401` | Sai hoặc thiếu `x-api-key` |
+| `413` | Body vượt giới hạn 16 KB |
+| `422` | Giá trị ngoài ngưỡng vật lý (nghi do cảm biến lỗi) |
+| `429` | Vượt giới hạn tần suất (30 request/phút) |
 
 Thử bằng curl:
 
@@ -561,6 +572,13 @@ git grep -n "<mật-khẩu-Wi-Fi-thật>"
 ngay API key và mật khẩu Wi-Fi, rồi gỡ file khỏi git
 (`git rm --cached <file>`) hoặc tạo lại repo mới nếu chưa ai dùng.
 
+> ⚠️ **Lưu ý với repo này:** các giá trị `DEVICE_API_KEY` và mật khẩu Wi-Fi đã từng
+> xuất hiện trong lịch sử commit cũ (`esp8266_weather_station.ino` chứa hardcode).
+> Việc tách sang `secrets.h` chỉ làm **file hiện tại** sạch — bí mật vẫn còn trong
+> lịch sử GitHub. Vì vậy **bắt buộc phải đổi API key và mật khẩu Wi-Fi** trước khi
+> tiếp tục sử dụng. Muốn xóa hẳn khỏi lịch sử thì dùng `git filter-repo` hoặc tạo
+> repo mới.
+
 **Khuyến nghị khác:**
 - Đặt `DEVICE_API_KEY` dài và khó đoán; mỗi lần đổi phải khởi động lại server và
   nạp lại code ESP8266.
@@ -572,16 +590,23 @@ ngay API key và mật khẩu Wi-Fi, rồi gỡ file khỏi git
 **Hạn chế:**
 - Phát hiện bất thường dựa trên **thống kê**, chưa phải học máy; chưa kiểm tra
   cảm biến mưa.
-- Nếu giá trị bất thường kéo dài, mỗi bản ghi sinh thêm một cảnh báo (chưa gộp
-  hoặc giới hạn tần suất).
 - Số đo bất thường vẫn nằm trong 30 bản ghi dùng làm mốc so sánh, có thể làm tăng
   độ lệch chuẩn và giảm độ nhạy ngay sau đó.
-- Chưa có cơ chế dọn dữ liệu cũ: database lớn dần theo thời gian.
-- Khoảng 7 ngày trả về toàn bộ bản ghi nên có thể chậm khi dữ liệu lớn.
 - Dashboard làm mới bằng cách hỏi định kỳ (polling), chưa dùng WebSocket.
 - Cảm biến mưa chỉ cho trạng thái có/không, không đo lượng mưa (mm).
+- Endpoint đọc (`/api/sensors/*`, `/api/alerts`) **chưa yêu cầu xác thực** — phù
+  hợp demo trong mạng nội bộ, cần thêm auth nếu mở công khai.
 - Độ chính xác của hệ thống phụ thuộc chất lượng cảm biến và lượng dữ liệu thu
   thập.
+
+**Đã xử lý ở phiên bản 1.1.0:**
+- Chống spam cảnh báo: mỗi cảm biến tối đa 1 cảnh báo / 5 phút.
+- Dọn dữ liệu cũ tự động (`DATA_RETENTION_DAYS`, mặc định 30 ngày); `alerts` chỉ
+  giữ 1000 bản mới nhất.
+- Lấy mẫu thưa (downsampling) tối đa 500 điểm khi trả lịch sử, kèm trường
+  `count` và `downsampled` để frontend biết dữ liệu đã bị lấy mẫu.
+- Rate limiting cho cả ghi dữ liệu, đọc dữ liệu và chatbot.
+- `helmet`, `morgan`, giới hạn body 16 KB, `trust proxy`, graceful shutdown.
 
 **Hướng phát triển:** thêm cảm biến (áp suất, gió, bụi), dự báo thời tiết, mô
 hình học máy cho phát hiện bất thường, gộp và giới hạn cảnh báo, thông báo qua

@@ -1,0 +1,27 @@
+# Secrets & local config
+Backend/.env
+Backend/esp8266_weather_station/secrets.h
+.env
+
+# Database (auto-created at runtime)
+Backend/weather.db
+Backend/weather.db-journal
+Backend/weather.db-wal
+Backend/weather.db-shm
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Dependencies
+**/node_modules/
+Backend/node_modules/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.log
+
+# Bản sao repo lồng nhau (nhân bản cũ, đã hợp nhất vào thư mục gốc)
+IoT-Based-Smart-Weather-Station-for-Real-Time-Environmental-Monitoring/

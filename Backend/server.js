@@ -1,29 +1,39 @@
 // server.js
-// Backend cho Trạm Quan Trắc Thời Tiết IoT
-// Nhận dữ liệu từ ESP8266, lưu SQLite, cung cấp API cho dashboard frontend.
-// Tích hợp Google Gemini AI cho chatbot trợ lý thời tiết.
+// Backend cho Trạm Quan Trắc Thời Tiết IoT (production-ready)
+// Nhận dữ liệu từ ESP8266, lưu SQLite, cung cấp API cho dashboard + chatbot Gemini.
 
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.DEVICE_API_KEY || 'demo-key-change-me'; // ESP8266 phải gửi đúng key này
+const PORT = Number(process.env.PORT) || 3000;
+const API_KEY = process.env.DEVICE_API_KEY || 'demo-key-change-me';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const OFFLINE_THRESHOLD_MS = 30 * 1000; // khớp với connectionState.offlineThresholdMs ở frontend
+const OFFLINE_THRESHOLD_MS = Number(process.env.OFFLINE_THRESHOLD_MS) || 30 * 1000;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'; // production: đặt domain dashboard, ví dụ https:// biases.example.com
+const DATA_RETENTION_DAYS = Number(process.env.DATA_RETENTION_DAYS) || 30;
+const ALERT_COOLDOWN_MS = 5 * 60 * 1000; // mỗi cảm biến tối đa 1 cảnh báo / 5 phút (chống spam)
+const MAX_HISTORY_POINTS = 500; // trần số điểm trả về cho chart (downsampling khi vượt)
+
+if (API_KEY === 'demo-key-change-me') {
+  console.warn('[WARN] DEVICE_API_KEY đang dùng giá trị mặc định. Hãy đặt key mạnh trong file .env trước khi production.');
+}
 
 // ---------- Google Gemini AI ----------
 let genAI = null;
-const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
 
 if (GEMINI_API_KEY) {
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  console.log('Gemini AI đã được khởi tạo với danh sách model ưu tiên:', GEMINI_MODELS.join(', '));
+  console.log('Gemini AI đã khởi tạo, thứ tự ưu tiên:', GEMINI_MODELS.join(', '));
 } else {
-  console.warn('GEMINI_API_KEY chưa được cấu hình. Chatbot AI sẽ không hoạt động.');
+  console.warn('GEMINI_API_KEY chưa cấu hình. Chatbot AI sẽ trả về 503.');
 }
 
 // ---------- Database ----------
@@ -36,12 +46,13 @@ db.exec(`
     temp REAL NOT NULL,
     hum REAL NOT NULL,
     light REAL NOT NULL,
-    rain INTEGER NOT NULL,
+    rain INTEGER NOT NULL CHECK (rain IN (0, 1)),
     device_id TEXT DEFAULT 'ESP8266-WX01',
     rssi INTEGER,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );
   CREATE INDEX IF NOT EXISTS idx_readings_created_at ON readings(created_at);
+  CREATE INDEX IF NOT EXISTS idx_readings_device_time ON readings(device_id, created_at);
 `);
 
 db.exec(`
@@ -51,16 +62,20 @@ db.exec(`
     value REAL NOT NULL,
     expected TEXT,
     reason TEXT NOT NULL,
-    severity TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('low','medium','high')),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );
+  CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at);
+  CREATE INDEX IF NOT EXISTS idx_alerts_sensor_time ON alerts(sensor, created_at);
 `);
 
 const insertAlert = db.prepare(`
   INSERT INTO alerts (sensor, value, expected, reason, severity)
   VALUES (@sensor, @value, @expected, @reason, @severity)
 `);
-
+const lastAlertTime = db.prepare(
+  `SELECT created_at FROM alerts WHERE sensor = ? ORDER BY created_at DESC LIMIT 1`
+);
 const recentReadings = db.prepare(
   'SELECT temp, hum, light FROM readings ORDER BY created_at DESC LIMIT 30'
 );
@@ -70,6 +85,13 @@ const SENSORS = {
   temp:  { label: 'Nhiệt độ', unit: '°C',  min: -10, max: 50,   minStd: 0.5 },
   hum:   { label: 'Độ ẩm',    unit: '%',   min: 0,   max: 100,  minStd: 2 },
   light: { label: 'Ánh sáng', unit: ' lux', min: 0,  max: 2000, minStd: 50 },
+};
+
+// Ngưỡng tuyệt đối để từ chối bản ghi rác (lỗi cảm biến / client sai), rộng hơn SENSORS
+const HARD_LIMITS = {
+  temp: { min: -50, max: 85 },
+  hum: { min: 0, max: 100 },
+  light: { min: 0, max: 150000 },
 };
 
 function detectAnomalies(reading) {
@@ -109,6 +131,12 @@ function detectAnomalies(reading) {
   return alerts;
 }
 
+function shouldInsertAlert(sensor) {
+  const row = lastAlertTime.get(sensor);
+  if (!row) return true;
+  return Date.now() - new Date(row.created_at).getTime() >= ALERT_COOLDOWN_MS;
+}
+
 const insertReading = db.prepare(`
   INSERT INTO readings (temp, hum, light, rain, device_id, rssi)
   VALUES (@temp, @hum, @light, @rain, @device_id, @rssi)
@@ -118,54 +146,109 @@ const latestReading = db.prepare(`
   SELECT * FROM readings ORDER BY created_at DESC LIMIT 1
 `);
 
-   const FMT = "'%Y-%m-%dT%H:%M:%fZ'";
-   const rangeToSql = {
-     '1h':  `strftime(${FMT}, 'now', '-1 hour')`,
-     '6h':  `strftime(${FMT}, 'now', '-6 hour')`,
-     '24h': `strftime(${FMT}, 'now', '-1 day')`,
-     '7d':  `strftime(${FMT}, 'now', '-7 day')`,
-   };
+const FMT = "'%Y-%m-%dT%H:%M:%fZ'";
+const rangeToSql = {
+  '1h':  `strftime(${FMT}, 'now', '-1 hour')`,
+  '6h':  `strftime(${FMT}, 'now', '-6 hour')`,
+  '24h': `strftime(${FMT}, 'now', '-1 day')`,
+  '7d':  `strftime(${FMT}, 'now', '-7 day')`,
+};
+
+// Lấy mẫu thưa (downsampling) khi dữ liệu quá dày — giữ tương thích field cũ + thêm count
+function downsample(rows, maxPoints) {
+  if (rows.length <= maxPoints) return rows;
+  const bucketSize = Math.ceil(rows.length / maxPoints);
+  const out = [];
+  for (let i = 0; i < rows.length; i += bucketSize) {
+    const bucket = rows.slice(i, i + bucketSize);
+    const avg = (f) => bucket.reduce((a, r) => a + r[f], 0) / bucket.length;
+    const mid = bucket[Math.floor(bucket.length / 2)];
+    out.push({
+      ...mid,
+      temp: +avg('temp').toFixed(2),
+      hum: +avg('hum').toFixed(1),
+      light: Math.round(avg('light')),
+      rain: bucket.some((r) => r.rain === 1) ? 1 : 0, // mưa: giữ 1 nếu bucket có mưa
+    });
+  }
+  return out;
+}
+
+// Dọn dữ liệu cũ mỗi 6 giờ: xóa readings quá hạn, giới hạn alerts tối đa 1000 bản ghi mới nhất
+function retentionCleanup() {
+  try {
+    const r = db.prepare(`DELETE FROM readings WHERE created_at < strftime('%Y-%m-%dT%H:%M:%fZ','now', ?)`)
+      .run(`-${DATA_RETENTION_DAYS} days`);
+    db.exec(`DELETE FROM alerts WHERE id NOT IN (SELECT id FROM alerts ORDER BY created_at DESC LIMIT 1000)`);
+    if (r.changes > 0) console.log(`[retention] Đã xóa ${r.changes} bản ghi quá ${DATA_RETENTION_DAYS} ngày.`);
+  } catch (err) {
+    console.error('[retention] Lỗi dọn dữ liệu:', err.message);
+  }
+}
+setInterval(retentionCleanup, 6 * 60 * 60 * 1000);
 
 // ---------- App ----------
 const app = express();
-app.use(cors());              // cho phép frontend (khác origin) gọi API
-app.use(express.json());      // parse JSON body từ ESP8266
-app.use(express.static(path.join(__dirname, '..', 'Frontend')));
+app.set('trust proxy', 1); // cần khi deploy sau reverse proxy (Render/Nginx) để rate-limit theo IP đúng
+app.use(helmet({ contentSecurityPolicy: false })); // CSP tắt để Chart.js CDN + inline script hoạt động; bật lại khi build frontend riêng
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+app.use(cors(CORS_ORIGIN === '*' ? undefined : { origin: CORS_ORIGIN.split(',').map((s) => s.trim()) }));
+app.use(express.json({ limit: '16kb' })); // chặn payload quá lớn từ thiết bị lạ
+app.use(express.static(path.join(__dirname, '..', 'Frontend'), { maxAge: '1h' }));
+
+// Rate limit: chống spam ghi dữ liệu + chống abuse chatbot
+const writeLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 }); // ~1 req/2s cho 1 thiết bị là dư
+const chatLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
+const readLimiter = rateLimit({ windowMs: 60 * 1000, max: 120 });
 
 // Middleware kiểm tra API key cho endpoint ghi dữ liệu (ESP8266 -> server)
 function requireDeviceKey(req, res, next) {
   const key = req.header('x-api-key');
-  if (key !== API_KEY) {
+  // so sánh hằng-thời-gian đơn giản để tránh timing-attack cơ bản
+  if (typeof key !== 'string' || key.length !== API_KEY.length ||
+      !require('crypto').timingSafeEqual(Buffer.from(key), Buffer.from(API_KEY))) {
     return res.status(401).json({ error: 'Sai hoặc thiếu x-api-key' });
   }
   next();
 }
 
 // ---------- POST /api/sensors  (ESP8266 gửi dữ liệu lên) ----------
-app.post('/api/sensors', requireDeviceKey, (req, res) => {
+app.post('/api/sensors', writeLimiter, requireDeviceKey, (req, res) => {
   const { temp, hum, light, rain, device_id, rssi } = req.body || {};
 
-  if ([temp, hum, light].some((v) => typeof v !== 'number' || Number.isNaN(v))) {
-    return res.status(400).json({ error: 'temp, hum, light phải là số' });
+  if ([temp, hum, light].some((v) => typeof v !== 'number' || Number.isNaN(v) || !Number.isFinite(v))) {
+    return res.status(400).json({ error: 'temp, hum, light phải là số hợp lệ' });
   }
   if (rain !== 0 && rain !== 1) {
     return res.status(400).json({ error: 'rain phải là 0 hoặc 1' });
   }
+  if (temp < HARD_LIMITS.temp.min || temp > HARD_LIMITS.temp.max ||
+      hum < HARD_LIMITS.hum.min || hum > HARD_LIMITS.hum.max ||
+      light < HARD_LIMITS.light.min || light > HARD_LIMITS.light.max) {
+    return res.status(422).json({ error: 'Giá trị ngoài ngưỡng vật lý, có thể cảm biến lỗi. Kiểm tra lại thiết bị.' });
+  }
+  if (device_id !== undefined && (typeof device_id !== 'string' || device_id.length > 32)) {
+    return res.status(400).json({ error: 'device_id tối đa 32 ký tự' });
+  }
+  if (rssi !== undefined && rssi !== null && (typeof rssi !== 'number' || rssi > 0 || rssi < -120)) {
+    return res.status(400).json({ error: 'rssi phải trong khoảng -120..0 dBm' });
+  }
 
   const found = detectAnomalies({ temp, hum, light });
-  found.forEach((a) => insertAlert.run(a));
+  // Chống spam cảnh báo: mỗi cảm biến tối đa 1 cảnh báo / ALERT_COOLDOWN_MS
+  found.filter((a) => shouldInsertAlert(a.sensor)).forEach((a) => insertAlert.run(a));
 
   insertReading.run({
     temp, hum, light, rain,
     device_id: device_id || 'ESP8266-WX01',
-    rssi: typeof rssi === 'number' ? rssi : null,
+    rssi: typeof rssi === 'number' ? Math.round(rssi) : null,
   });
 
-  res.status(201).json({ ok: true });
+  res.status(201).json({ ok: true, alerts: found.length });
 });
 
 // ---------- GET /api/sensors/latest ----------
-app.get('/api/sensors/latest', (req, res) => {
+app.get('/api/sensors/latest', readLimiter, (req, res) => {
   const row = latestReading.get();
   if (!row) {
     return res.status(204).end(); // chưa có dữ liệu nào — frontend giữ trạng thái "Đang chờ"
@@ -185,7 +268,7 @@ app.get('/api/sensors/latest', (req, res) => {
 });
 
 // ---------- GET /api/sensors/history?range=1h|6h|24h|7d ----------
-app.get('/api/sensors/history', (req, res) => {
+app.get('/api/sensors/history', readLimiter, (req, res) => {
   const range = rangeToSql[req.query.range] ? req.query.range : '1h';
   const sinceExpr = rangeToSql[range];
 
@@ -193,18 +276,22 @@ app.get('/api/sensors/history', (req, res) => {
     .prepare(`SELECT * FROM readings WHERE created_at >= ${sinceExpr} ORDER BY created_at ASC`)
     .all();
 
+  const sampled = downsample(rows, MAX_HISTORY_POINTS);
+
   res.json({
     range,
-    labels: rows.map((r) => r.created_at),
-    temp: rows.map((r) => r.temp),
-    hum: rows.map((r) => r.hum),
-    light: rows.map((r) => r.light),
-    rain: rows.map((r) => r.rain),
+    count: rows.length,
+    downsampled: sampled.length !== rows.length,
+    labels: sampled.map((r) => r.created_at),
+    temp: sampled.map((r) => r.temp),
+    hum: sampled.map((r) => r.hum),
+    light: sampled.map((r) => r.light),
+    rain: sampled.map((r) => r.rain),
   });
 });
 
    // ---------- GET /api/alerts ----------
-   app.get('/api/alerts', (req, res) => {
+   app.get('/api/alerts', readLimiter, (req, res) => {
      const limit = Math.min(Number(req.query.limit) || 20, 100);
      const rows = db
        .prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT ?')
@@ -212,10 +299,13 @@ app.get('/api/sensors/history', (req, res) => {
      res.json(rows);
    });
 // ---------- POST /api/chat  (Chatbot AI dùng Gemini) ----------
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', chatLimiter, async (req, res) => {
   const { message } = req.body || {};
   if (!message || typeof message !== 'string' || !message.trim()) {
     return res.status(400).json({ error: 'Vui lòng nhập câu hỏi.' });
+  }
+  if (message.trim().length > 2000) {
+    return res.status(413).json({ error: 'Câu hỏi quá dài (tối đa 2000 ký tự).' });
   }
 
   if (!genAI) {
@@ -300,7 +390,7 @@ ${alertContext}`;
         if (reply) break;
       } catch (err) {
         lastError = err;
-        console.warn(`Model ${modelName} thất bại, đang thử model tiếp theo... (${err.message.slice(0, 80)})`);
+        console.warn(`Model ${modelName} thất bại, đang thử model tiếp theo... (${String(err && err.message || err).slice(0, 80)})`);
       }
     }
 
@@ -316,9 +406,48 @@ ${alertContext}`;
 });
 
 // ---------- Health check ----------
-app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
-
-app.listen(PORT, () => {
-  console.log(`Weather backend đang chạy tại http://localhost:${PORT}`);
-  console.log(`API key cho ESP8266 (header x-api-key): ${API_KEY}`);
+app.get('/api/health', (req, res) => {
+  let dbOk = true;
+  try {
+    db.prepare('SELECT 1').get();
+  } catch {
+    dbOk = false;
+  }
+  res.status(dbOk ? 200 : 503).json({
+    ok: dbOk,
+    time: new Date().toISOString(),
+    uptimeSec: Math.round(process.uptime()),
+    version: '1.1.0',
+  });
 });
+
+// 404 cho API không tồn tại (trước static fallback)
+app.use('/api', (req, res) => res.status(404).json({ error: 'Endpoint không tồn tại' }));
+
+// Error handler tập trung — không bao giờ lộ stack ra client ở production
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('[error]', err);
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Payload quá lớn' });
+  }
+  res.status(500).json({ error: 'Lỗi server nội bộ' });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`Weather backend đang chạy tại http://localhost:${PORT}`);
+  console.log(`API key cho ESP8266: ${API_KEY === 'demo-key-change-me' ? '(CHƯA ĐỔI — hãy đặt DEVICE_API_KEY!)' : '(đã cấu hình)'}`);
+});
+
+function shutdown(signal) {
+  console.log(`\nNhận ${signal}, đang tắt server...`);
+  server.close(() => {
+    db.close();
+    console.log('Đã đóng HTTP server + SQLite. Tạm biệt!');
+    process.exit(0);
+  });
+  // Ép tắt sau 10s nếu còn kết nối treo
+  setTimeout(() => process.exit(1), 10000).unref();
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
