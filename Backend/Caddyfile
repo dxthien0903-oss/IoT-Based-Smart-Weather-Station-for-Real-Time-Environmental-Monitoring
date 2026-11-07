@@ -1,0 +1,25 @@
+# Caddyfile — reverse proxy HTTPS cho IoT Weather Station
+#
+# Caddy tự động lấy chứng thư Let's Encrypt và tự gia hạn — không cần config thủ công.
+#
+# Cách dùng:
+#   1. Cài Caddy: https://caddyserver.com/docs/install
+#   2. Trỏ DNS domain về IP máy chạy backend (A record)
+#   3. Sửa domain trong file này
+#   4. Chạy: caddy run --config Caddyfile
+#   5. Đặt trong .env:  NODE_ENV=production, FORCE_HTTPS=true, CORS_ORIGIN=https://domain-cua-ban
+
+weather.example.com {
+	encode gzip
+
+	# Chuyển tiếp tới Node.js ở cổng 3000
+	reverse_proxy localhost:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Log truy cập (bỏ comment để bật)
+	# log {
+	#   output file C:\caddy-logs\access.log
+	# }
+}

@@ -22,6 +22,7 @@ Wi-Fi, Anomaly Detection
 10. [Phát hiện bất thường](#10-phát-hiện-bất-thường)
 11. [Xử lý sự cố](#11-xử-lý-sự-cố)
 12. [Triển khai lên cloud (tùy chọn)](#12-triển-khai-lên-cloud-tùy-chọn)
+12B. [Chuyển từ HTTP sang HTTPS](#12b-chuyển-từ-http-sang-https)
 13. [Bảo mật và đưa dự án lên GitHub](#13-bảo-mật-và-đưa-dự-án-lên-github)
 14. [Hạn chế đã biết và hướng phát triển](#14-hạn-chế-đã-biết-và-hướng-phát-triển)
 15. [Nhóm thực hiện](#15-nhóm-thực-hiện)
@@ -84,14 +85,18 @@ IoT-Based-Smart-Weather-Station-for-Real-Time-Environmental-Monitoring/
 │       ├── dashboard.js           Logic dashboard: dữ liệu, biểu đồ, cảnh báo
 │       └── chatwidget.js          Widget chatbot AI nổi
 └── Backend/
-    ├── server.js                  Server Express + SQLite
+    ├── server.js                  Server Express + SQLite (hỗ trợ HTTP và HTTPS)
     ├── simulate.js                Giả lập ESP8266 khi chưa có phần cứng
+    ├── generate-cert.js           Tạo chứng thư tự ký cho HTTPS local
+    ├── start-tunnel.ps1           Script chạy Cloudflare Tunnel (PowerShell)
+    ├── Caddyfile                  Cấu hình reverse proxy Caddy (Let's Encrypt)
     ├── package.json
     ├── .env.example               Mẫu cấu hình (giá trị giả)
     ├── .env                       Cấu hình thật (tự tạo, KHÔNG có trên GitHub)
     ├── weather.db*                Database (tự tạo khi chạy, KHÔNG có trên GitHub)
+    ├── certs/                     Chứng thư HTTPS (tự tạo, KHÔNG có trên GitHub)
     └── esp8266_weather_station/
-        ├── esp8266_weather_station.ino   Code Arduino cho ESP8266
+        ├── esp8266_weather_station.ino   Code Arduino cho ESP8266 (hỗ trợ HTTP + HTTPS)
         ├── secrets.h.example             Mẫu Wi-Fi và API key (giá trị giả)
         └── secrets.h                     Thông tin thật (tự tạo, KHÔNG có trên GitHub)
 ```
@@ -218,6 +223,11 @@ hiện bất thường, cung cấp API cho dashboard và phục vụ thư mục 
 | `OFFLINE_THRESHOLD_MS` | `30000` | Ngưỡng coi thiết bị là offline. Khớp với `connectionState.offlineThresholdMs` ở frontend |
 | `CORS_ORIGIN` | `*` | Cho phép origin gọi API. **Production: đặt domain dashboard**, ví dụ `https://weather.example.com` |
 | `DATA_RETENTION_DAYS` | `30` | Số ngày giữ dữ liệu đo. Cũ hơn sẽ tự xóa mỗi 6 giờ |
+| `NODE_ENV` | (rỗng) | Đặt `production` để bật HSTS, log `combined`, cảnh báo khi thiếu HTTPS |
+| `FORCE_HTTPS` | `false` | `true` + `NODE_ENV=production` → tự chuyển hướng HTTP sang HTTPS (dùng sau reverse proxy) |
+| `TRUST_PROXY_HOPS` | `1` | Số lớp reverse proxy, để rate-limit tính đúng IP thật. Cloudflare/Caddy = `1` |
+| `SSL_KEY_PATH` | (rỗng) | Đường dẫn private key PEM. Đặt cả `SSL_KEY_PATH` + `SSL_CERT_PATH` để chạy HTTPS trực tiếp |
+| `SSL_CERT_PATH` | (rỗng) | Đường dẫn certificate PEM (xem mục 12B) |
 
 ### 6.2. API ghi dữ liệu (ESP8266 gửi lên)
 
@@ -424,11 +434,20 @@ Yêu cầu bắt buộc:
 - `SERVER_URL` dùng **IPv4 của máy chạy backend** (xem bằng `ipconfig`), không
   dùng `localhost`.
 - ESP8266 và máy chạy backend **cùng mạng Wi-Fi**, băng tần **2.4 GHz**.
-- Dùng `http://` khi chạy trong mạng LAN.
+- Dùng `http://` khi chạy trong mạng LAN; dùng `https://` khi backend đã bật
+  HTTPS (xem mục 12B). Firmware tự chọn `WiFiClient` hoặc `WiFiClientSecure` theo
+  tiền tố của `SERVER_URL`.
 - `DEVICE_API_KEY` phải giống `DEVICE_API_KEY` trong `.env`.
 - Nếu Windows Firewall chặn, cho phép **Node.js** qua firewall (mạng Private).
 - IP của máy có thể đổi sau khi khởi động lại máy hoặc router; nếu thiết bị đột
   nhiên không gửi được, kiểm tra lại IP.
+
+Khi dùng HTTPS, có thể thêm chứng thư root CA để firmware xác minh chứng thư
+server (bắt buộc với production, xem mục 12B.5):
+
+```cpp
+#define CA_CERT "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
+```
 
 ### 8.4. Nạp code
 
@@ -537,6 +556,174 @@ Lưu ý:
 - Tính năng và giới hạn của gói miễn phí có thể thay đổi, hãy xem tài liệu của
   nhà cung cấp.
 
+---
+
+## 12B. Chuyển từ HTTP sang HTTPS
+
+Backend đã sẵn sàng cho HTTPS: hỗ trợ chứng thư trực tiếp, tự chuyển hướng
+HTTP→HTTPS sau reverse proxy, và bật HSTS ở chế độ production.
+
+### 12B.1. Ba cách triển khai HTTPS
+
+| Cách | Khi nào dùng | Chứng thư | Ghi chú |
+|---|---|---|---|
+| **A. Cloudflare Tunnel** | Muốn link HTTPS **ngay lập tức**, không cần mua domain | Cloudflare tự cấp | Miễn phí, chạy ngay trên máy bạn, database vẫn nằm local |
+| **B. Caddy + domain** | Muốn link HTTPS ổn định, truy cập ngoài mạng LAN | Let's Encrypt (tự gia hạn) | Cần mua domain (~250k/năm) + mở port 80/443 |
+| **C. Render/Railway** | Muốn server chạy 24/7 không cần bật máy | Cấp tự động | SQLite cần ổ đĩa bền vững, gói miễn phí có thể ngủ |
+
+### 12B.2. Cách A — Cloudflare Tunnel (nhanh nhất, ~10 phút)
+
+Không cần domain, không cần mở port. Link dạng `https://xxx.trycloudflare.com`.
+
+```bash
+# 1. Tải cloudflared cho Windows
+winget install --id Cloudflare.cloudflared
+
+# 2. Chạy tunnel tới backend của bạn
+cloudflared tunnel --url http://localhost:3000
+```
+
+Lệnh sẽ in ra link HTTPS, ví dụ `https://random-name.trycloudflare.com`.
+Mở link đó trên điện thoại là thấy dashboard.
+
+**Hoặc dùng script có sẵn (khuyến nghị — tự kiểm tra backend, tự in link):**
+
+```powershell
+cd Backend
+.\start-tunnel.ps1
+```
+
+Nhấn `Ctrl+C` để dừng tunnel.
+
+> ⚠️ **Quick tunnel có URL ngẫu nhiên, đổi mỗi lần restart** và **không có cam kết
+> uptime**. Dùng để demo / bảo vệ đồ án. Muốn URL cố định thì dùng named tunnel.
+
+Đổi link cố định (cần tài khoản Cloudflare + domain):
+```bash
+cloudflared tunnel login
+cloudflared tunnel create weather-station
+cloudflared tunnel route dns weather-station weather.example.com
+# rồi trỏ domain của bạn về Cloudflare Nameservers
+```
+
+Trong `Backend/.env` nên thêm:
+```
+NODE_ENV=production
+CORS_ORIGIN=*
+TRUST_PROXY_HOPS=1
+```
+
+> **Lưu ý quan trọng:** khi dùng Cloudflare Tunnel **không** bật `FORCE_HTTPS=true`.
+> Cloudflare đã lo phần TLS ở edge rồi, tunnel nối vào backend bằng HTTP local.
+> Bật `FORCE_HTTPS` khiến backend tự redirect sang HTTPS và tạo vòng lặp redirect
+> (lỗi `ERR_SSL_WRONG_VERSION_NUMBER`). `NODE_ENV=production` vẫn nên bật để có
+> HSTS và log `combined`.
+
+### 12B.3. Cách B — Caddy + Let's Encrypt (ổn định nhất)
+
+Đã có sẵn file `Backend/Caddyfile`. Caddy tự lấy và tự gia hạn chứng thư.
+
+```bash
+# 1. Cài Caddy
+winget install --id caddyserver.caddy
+
+# 2. Sửa domain trong Backend/Caddyfile thành domain của bạn
+
+# 3. Trỏ DNS A record của domain về IP máy bạn
+
+# 4. Chạy
+cd Backend
+caddy run --config Caddyfile
+```
+
+Caddy sẽ tự:
+- Lấy chứng thư Let's Encrypt cho domain của bạn
+- Chuyển tiếp mọi request tới `localhost:3000`
+- Gia hạn chứng thư tự động
+
+Trong `Backend/.env`:
+```
+NODE_ENV=production
+FORCE_HTTPS=true
+CORS_ORIGIN=https://weather.example.com
+TRUST_PROXY_HOPS=1
+```
+
+### 12B.4. Cách C — HTTPS trực tiếp trên Node.js (LAN/demo)
+
+Chạy thẳng HTTPS không qua reverse proxy:
+
+```bash
+cd Backend
+npm run cert       # tạo certs/key.pem + certs/cert.pem (tự ký, tự thêm IP LAN vào SAN)
+```
+
+Trong `Backend/.env`:
+```
+SSL_KEY_PATH=./certs/key.pem
+SSL_CERT_PATH=./certs/cert.pem
+```
+
+Rồi `npm start`. Dashboard sẽ ở `https://<IP-LAN-của-bạn>:3000`.
+
+> ⚠️ **Cảnh báo**: chứng thư tự ký khiến trình duyệt hiện cảnh báo
+> "Your connection is not private" và ESP8266 phải dùng `setInsecure()`.
+> Chỉ dùng cách này để demo trong mạng nội bộ — **không dùng cho production**.
+> Với production, hãy dùng Caddy (cách B) hoặc Cloudflare Tunnel (cách A).
+
+### 12B.5. Cập nhật firmware ESP8266 cho HTTPS
+
+Firmware tự động chọn HTTP hay HTTPS dựa trên `SERVER_URL` trong `secrets.h`:
+
+```cpp
+#define SERVER_URL "https://weather.example.com/api/sensors"   // HTTPS
+// hoặc
+#define SERVER_URL "http://192.168.1.4:3000/api/sensors"       // HTTP LAN
+```
+
+Khi `SERVER_URL` bắt đầu bằng `https://`, firmware dùng `WiFiClientSecure`:
+
+- **Demo**: để trống `CA_CERT` → firmware tự gọi `setInsecure()` (không kiểm tra
+  chứng thư, dễ bị tấn công MITM — chỉ dùng để thử).
+- **Production**: điền chứng thư root CA vào `secrets.h` để firmware xác minh
+  chứng thư server:
+
+```cpp
+#define CA_CERT "-----BEGIN CERTIFICATE-----\nMIIB...n-----END CERTIFICATE-----\n"
+```
+
+Lấy CA của domain:
+`openssl s_client -connect weather.example.com:443 -servername weather.example.com </dev/null 2>/dev/null | openssl x509 -showcerts`
+
+Nếu dùng Cloudflare Tunnel, hãy chọn chứng thư **Let's Encrypt** để ESP8266 tin
+cậy được mà không cần cài CA riêng.
+
+**Với quick tunnel (URL đổi mỗi lần restart):** bỏ trống `CA_CERT` là firmware tự
+gọi `setInsecure()`. Vì link Cloudflare đã có chứng thư Let's Encrypt hợp lệ,
+trình duyệt và ESP8266 vẫn kết nối được bình thường — chỉ là firmware không
+tự kiểm tra chứng thư.
+
+```cpp
+#define SERVER_URL "https://ten-ban-phan-tinh.trycloudflare.com/api/sensors"
+```
+
+> ⚠️ Vì quick tunnel đổi URL mỗi lần chạy lại, bạn phải **sửa lại `SERVER_URL`
+> và nạp lại firmware** mỗi khi muốn đổi link. Đây là lý do nên dùng named
+> tunnel hoặc Caddy cho bản demo chính thức.
+
+### 12B.6. Kiểm tra sau khi chuyển HTTPS
+
+```bash
+curl -I https://weather.example.com/api/health
+# HTTP/2 200
+# strict-transport-security: max-age=31536000; includeSubDomains
+```
+
+Trên trình duyệt, mở DevTools → tab Network → cột Protocol phải hiện `h2` hoặc
+`https`, và tab Console không được có lỗi mixed content.
+
+---
+
 ## 13. Bảo mật và đưa dự án lên GitHub
 
 **File bí mật không được commit.** `.gitignore` của dự án phải có:
@@ -548,6 +735,10 @@ weather.db
 weather.db-wal
 weather.db-shm
 secrets.h
+certs/
+*.pem
+*.key
+*.pfx
 ```
 
 Chỉ commit các file mẫu (`.env.example`, `secrets.h.example`) chứa **giá trị

@@ -1,13 +1,15 @@
 {
   "name": "weather-station-backend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Backend cho đồ án IoT-Based Smart Weather Station (ESP8266)",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "simulate": "node simulate.js"
+    "simulate": "node simulate.js",
+    "cert": "node generate-cert.js",
+    "start:https": "node generate-cert.js && node -e \"process.env.SSL_KEY_PATH='./certs/key.pem';process.env.SSL_CERT_PATH='./certs/cert.pem';require('./server.js')\""
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -21,5 +23,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "selfsigned": "^5.5.0"
   }
 }

@@ -5,3 +5,9 @@ weather.db-journal
 weather.db-wal
 weather.db-shm
 esp8266_weather_station/secrets.h
+
+# Chứng thư HTTPS (private key KHÔNG được commit)
+certs/
+*.pem
+*.key
+*.pfx

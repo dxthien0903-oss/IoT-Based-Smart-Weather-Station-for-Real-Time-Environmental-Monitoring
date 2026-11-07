@@ -1,27 +1,39 @@
-// chatwidget.js — Floating AI Chat Widget logic
+// chatwidget.js — Floating AI chat widget logic
 (function () {
   'use strict';
 
-  const API_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : location.origin;
-  const fab = document.getElementById('chat-fab');
-  const widget = document.getElementById('chat-widget');
-  const closeBtn = document.getElementById('chat-widget-close');
-  const messagesEl = document.getElementById('chat-messages');
-  const inputEl = document.getElementById('chat-input');
-  const sendBtn = document.getElementById('chat-send-btn');
-  const quickActions = document.getElementById('chat-quick-actions');
-  const fabIconChat = document.getElementById('fab-icon-chat');
-  const fabIconClose = document.getElementById('fab-icon-close');
+  var API_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : location.origin;
 
-  let isOpen = false;
-  let isWaiting = false;
+  var fab = document.getElementById('chat-fab');
+  var widget = document.getElementById('chat-widget');
+  var closeBtn = document.getElementById('chat-widget-close');
+  var messagesEl = document.getElementById('chat-messages');
+  var inputEl = document.getElementById('chat-input');
+  var sendBtn = document.getElementById('chat-send-btn');
+  var quickActions = document.getElementById('chat-quick-actions');
+  var fabIconChat = document.getElementById('fab-icon-chat');
+  var fabIconClose = document.getElementById('fab-icon-close');
 
-  // Toggle chat widget
+  var isOpen = false;
+  var isWaiting = false;
+
+  var ASSISTANT_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="4" y="8" width="16" height="12" rx="3"/><circle cx="12" cy="3.5" r="1.2"/>' +
+    '<path d="M9.5 13h.01M14.5 13h.01"/></svg>';
+
+  var USER_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></svg>';
+
   function toggleChat() {
     isOpen = !isOpen;
     widget.classList.toggle('open', isOpen);
     widget.setAttribute('aria-hidden', String(!isOpen));
     fab.classList.toggle('active', isOpen);
+    fab.setAttribute('aria-expanded', String(isOpen));
     fabIconChat.classList.toggle('hidden', isOpen);
     fabIconClose.classList.toggle('hidden', !isOpen);
     if (isOpen) {
@@ -33,78 +45,96 @@
   fab.addEventListener('click', toggleChat);
   closeBtn.addEventListener('click', toggleChat);
 
-  // Auto-resize textarea
-  inputEl.addEventListener('input', () => {
-    inputEl.style.height = 'auto';
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 100) + 'px';
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && isOpen) toggleChat();
   });
 
-  // Send on Enter (Shift+Enter for newline)
-  inputEl.addEventListener('keydown', (e) => {
+  // Auto-resize textarea
+  inputEl.addEventListener('input', function () {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 96) + 'px';
+  });
+
+  // Enter sends, Shift+Enter newlines
+  inputEl.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   });
 
-  sendBtn.addEventListener('click', () => sendMessage());
+  sendBtn.addEventListener('click', function () { sendMessage(); });
 
-  // Quick action buttons
-  quickActions.addEventListener('click', (e) => {
-    const btn = e.target.closest('.chat-quick-btn');
+  // Quick actions
+  quickActions.addEventListener('click', function (e) {
+    var btn = e.target.closest('.chat-quick-btn');
     if (!btn) return;
     inputEl.value = btn.dataset.q;
     sendMessage();
   });
 
   function appendMessage(role, html) {
-    const div = document.createElement('div');
-    div.className = `chat-message ${role}`;
-    const avatar = role === 'assistant' ? '🤖' : '👤';
-    div.innerHTML = `
-      <div class="chat-avatar">${avatar}</div>
-      <div class="chat-bubble">${html}</div>
-    `;
+    var div = document.createElement('div');
+    div.className = 'chat-message ' + role;
+
+    var avatar = document.createElement('div');
+    avatar.className = 'chat-avatar';
+    avatar.setAttribute('aria-hidden', 'true');
+    avatar.innerHTML = role === 'assistant' ? ASSISTANT_ICON : USER_ICON;
+
+    var bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.innerHTML = html;
+
+    div.appendChild(avatar);
+    div.appendChild(bubble);
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function showTyping() {
-    const div = document.createElement('div');
+    var div = document.createElement('div');
     div.className = 'chat-message assistant';
     div.id = 'typing-msg';
-    div.innerHTML = `
-      <div class="chat-avatar">🤖</div>
-      <div class="chat-bubble">
-        <div class="typing-indicator"><span></span><span></span><span></span></div>
-      </div>
-    `;
+
+    var avatar = document.createElement('div');
+    avatar.className = 'chat-avatar';
+    avatar.setAttribute('aria-hidden', 'true');
+    avatar.innerHTML = ASSISTANT_ICON;
+
+    var bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+    div.appendChild(avatar);
+    div.appendChild(bubble);
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function removeTyping() {
-    const t = document.getElementById('typing-msg');
+    var t = document.getElementById('typing-msg');
     if (t) t.remove();
   }
 
   function escapeHtml(str) {
-    const div = document.createElement('div');
+    var div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
   }
 
+  // Minimal, safe markdown: bold + bullet lists only. Input is escaped first.
   function formatResponse(text) {
-    let html = escapeHtml(text);
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    var html = escapeHtml(text);
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/^[•\-]\s+(.+)$/gm, '<li>$1</li>');
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    html = html.replace(/(<li>[\s\S]*?<\/li>\n?)+/g, '<ul>$&</ul>');
     html = html.replace(/\n/g, '<br>');
     return html;
   }
 
-  async function sendMessage() {
-    const text = inputEl.value.trim();
+  function sendMessage() {
+    var text = inputEl.value.trim();
     if (!text || isWaiting) return;
 
     quickActions.style.display = 'none';
@@ -116,30 +146,32 @@
     sendBtn.disabled = true;
     showTyping();
 
-    try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
+    fetch(API_BASE + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    })
+      .then(function (res) {
+        removeTyping();
+        if (!res.ok) {
+          return res.json()
+            .catch(function () { return { error: 'Lỗi kết nối server' }; })
+            .then(function (err) {
+              appendMessage('assistant', escapeHtml(err.error || 'Đã xảy ra lỗi, vui lòng thử lại.'));
+            });
+        }
+        return res.json().then(function (data) {
+          appendMessage('assistant', formatResponse(data.reply || ''));
+        });
+      })
+      .catch(function () {
+        removeTyping();
+        appendMessage('assistant', 'Không thể kết nối server. Kiểm tra lại kết nối mạng.');
+      })
+      .then(function () {
+        isWaiting = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
       });
-
-      removeTyping();
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Lỗi kết nối server' }));
-        appendMessage('assistant', `⚠️ ${escapeHtml(err.error || 'Đã xảy ra lỗi, vui lòng thử lại.')}`);
-      } else {
-        const data = await res.json();
-        appendMessage('assistant', formatResponse(data.reply));
-      }
-    } catch (err) {
-      removeTyping();
-      appendMessage('assistant', '⚠️ Không thể kết nối server. Kiểm tra lại kết nối mạng.');
-    } finally {
-      isWaiting = false;
-      sendBtn.disabled = false;
-      inputEl.focus();
-    }
   }
 })();
-

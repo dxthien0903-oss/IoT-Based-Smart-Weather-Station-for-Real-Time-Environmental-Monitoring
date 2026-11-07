@@ -189,8 +189,28 @@ setInterval(retentionCleanup, 6 * 60 * 60 * 1000);
 
 // ---------- App ----------
 const app = express();
-app.set('trust proxy', 1); // cần khi deploy sau reverse proxy (Render/Nginx) để rate-limit theo IP đúng
-app.use(helmet({ contentSecurityPolicy: false })); // CSP tắt để Chart.js CDN + inline script hoạt động; bật lại khi build frontend riêng
+
+// trust proxy: bắt buộc khi chạy sau reverse proxy (Cloudflare, Nginx, Caddy, Render)
+// để rate-limit tính đúng theo IP thật của client và để req.secure hoạt động.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1);
+
+// Tự chuyển HTTP -> HTTPS khi chạy sau proxy (Cloudflare/Nginx) và production
+if (process.env.FORCE_HTTPS === 'true' && process.env.NODE_ENV === 'production') {
+  app.use(function (req, res, next) {
+    if (req.secure || req.headers['x-forwarded-proto'] === 'https') return next();
+    return res.redirect(301, 'https://' + req.headers.host + req.originalUrl);
+  });
+}
+
+app.use(helmet({
+  contentSecurityPolicy: false, // CSP tắt để Chart.js CDN + inline script hoạt động; bật lại khi build frontend riêng
+  hsts: process.env.NODE_ENV === 'production'
+    ? { maxAge: 31536000, includeSubDomains: true, preload: false }
+    : false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  crossOriginEmbedderPolicy: false,
+}));
+
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(cors(CORS_ORIGIN === '*' ? undefined : { origin: CORS_ORIGIN.split(',').map((s) => s.trim()) }));
 app.use(express.json({ limit: '16kb' })); // chặn payload quá lớn từ thiết bị lạ
@@ -434,9 +454,38 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Lỗi server nội bộ' });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Weather backend đang chạy tại http://localhost:${PORT}`);
-  console.log(`API key cho ESP8266: ${API_KEY === 'demo-key-change-me' ? '(CHƯA ĐỔI — hãy đặt DEVICE_API_KEY!)' : '(đã cấu hình)'}`);
+// ---------- Khởi động HTTP hoặc HTTPS ----------
+// HTTPS trực tiếp: đặt SSL_KEY_PATH + SSL_CERT_PATH (chứng chỉ PEM).
+// Nếu không có, server chạy HTTP và phía trước nên có reverse proxy (Caddy/Nginx/Cloudflare).
+const SSL_KEY_PATH = process.env.SSL_KEY_PATH;
+const SSL_CERT_PATH = process.env.SSL_CERT_PATH;
+const USE_HTTPS = Boolean(SSL_KEY_PATH && SSL_CERT_PATH &&
+  require('fs').existsSync(SSL_KEY_PATH) && require('fs').existsSync(SSL_CERT_PATH));
+
+let server;
+if (USE_HTTPS) {
+  const https = require('https');
+  server = https.createServer({
+    key: require('fs').readFileSync(SSL_KEY_PATH),
+    cert: require('fs').readFileSync(SSL_CERT_PATH),
+  }, app);
+  server.listen(PORT); // BẮT BUỘC: createServer chỉ tạo server, phải listen mới nhận kết nối
+  console.log('🔒 Chế độ HTTPS trực tiếp (chứng chỉ: ' + SSL_CERT_PATH + ')');
+} else {
+  server = app.listen(PORT);
+  if (process.env.NODE_ENV === 'production') {
+    console.log('⚠️  Đang chạy HTTP ở production. Đặt SSL_KEY_PATH + SSL_CERT_PATH,');
+    console.log('   hoặc đặt reverse proxy (Caddy/Nginx/Cloudflare) trước để có HTTPS.');
+  }
+}
+
+server.on('listening', () => {
+  const scheme = USE_HTTPS ? 'https' : 'http';
+  console.log(`🌐 ${scheme}://localhost:${PORT}`);
+  console.log(`🔑 API key cho ESP8266: ${API_KEY === 'demo-key-change-me' ? '(CHƯA ĐỔI — hãy đặt DEVICE_API_KEY!)' : '(đã cấu hình)'}`);
+  if (CORS_ORIGIN === '*' && process.env.NODE_ENV === 'production') {
+    console.warn('⚠️  CORS_ORIGIN đang là "*". Production nên giới hạn theo domain dashboard.');
+  }
 });
 
 function shutdown(signal) {
