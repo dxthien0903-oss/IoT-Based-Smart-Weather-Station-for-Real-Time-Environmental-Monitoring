@@ -6,15 +6,22 @@
 # Link HTTPS sẽ được in ra, ví dụ:
 #   https://assistance-midlands-union-plugin.trycloudflare.com
 #
+# Script cũng tự ghi link hiện tại vào file tunnel-url.txt (để ESP8266 tự
+# lấy link — xem README mục 12B.7). Đổi link mỗi lần chạy lại cũng không sao.
+#
 # LƯU Ý: quick tunnel tạo URL NGẪU NHIÊN, đổi mỗi lần chạy lại.
-# Muốn URL cố định → dùng named tunnel (xem README mục 12B.2).
+# Muốn URL cố định → dùng named tunnel (cần domain, xem README mục 12B.2).
+
+param(
+    # Ghi link vào file này (để ESP8266 tự đọc)
+    [string]$UrlFile = (Join-Path $PSScriptRoot 'tunnel-url.txt')
+)
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host "=== Cloudflare Tunnel cho IoT Weather Station ===" -ForegroundColor Cyan
 
-# 1. Kiểm tra cloudflared
+# 1. Tìm cloudflared
 $cf = Get-Command cloudflared -ErrorAction SilentlyContinue
 if (-not $cf) {
     $paths = @(
@@ -52,7 +59,7 @@ $proc = Start-Process -FilePath $cf -ArgumentList `
 
 # 4. Chờ lấy URL
 $url = $null
-for ($i = 0; $i -lt 30; $i++) {
+for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Seconds 1
     if (Test-Path $log) {
         $match = Select-String -Path $log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' -AllMatches |
@@ -64,21 +71,38 @@ for ($i = 0; $i -lt 30; $i++) {
     }
 }
 
-if ($url) {
-    Write-Host "`n============================================" -ForegroundColor Cyan
-    Write-Host "  TUNNEL HTTPS ĐANG HOẠT ĐỘNG:" -ForegroundColor Green
-    Write-Host "  $url" -ForegroundColor White
-    Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host "`nMở link trên điện thoại (cùng hoặc khác mạng đều được)."
-    Write-Host "Cho ESP8266: đặt SERVER_URL = '$url/api/sensors' trong secrets.h"
-    Write-Host "`nNhấn Ctrl+C để dừng tunnel."
-} else {
+if (-not $url) {
     Write-Host "Không lấy được URL. Xem log: $log" -ForegroundColor Red
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    exit 1
 }
+
+# 5. Ghi URL vào file (ESP8266 đọc file này để tự lấy link)
+#    Dùng WriteAllText + UTF8Encoding(false) để KHÔNG ghi BOM —
+#    Arduino String.trim() không loại BOM nên firmware sẽ đọc hỏng URL.
+try {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($UrlFile, "$url/api/sensors", $utf8NoBom)
+    Write-Host "Đã lưu link vào: $UrlFile" -ForegroundColor DarkGray
+} catch {
+    Write-Host "Không ghi được file $UrlFile : $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+Write-Host "`n============================================" -ForegroundColor Cyan
+Write-Host "  TUNNEL HTTPS ĐANG HOẠT ĐỘNG:" -ForegroundColor Green
+Write-Host "  $url" -ForegroundColor White
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "`nMở link trên điện thoại (cùng hoặc khác mạng đều được)."
+Write-Host "`nESP8266 - dung 1 trong 2 cach:"
+Write-Host "  A) URL co dinh (khong phai nap lai firmware khi link doi):" -ForegroundColor Yellow
+Write-Host "     #define SERVER_URL `"@https://raw.githubusercontent.com/USER/REPO/main/tunnel-url.txt`"" -ForegroundColor White
+Write-Host "  B) URL cung (phai nap lai firmware moi lan doi link):" -ForegroundColor Yellow
+Write-Host "     #define SERVER_URL `"$url/api/sensors`"" -ForegroundColor White
+Write-Host "`nNhan Ctrl+C de dung tunnel."
 
 try {
     while ($true) { Start-Sleep -Seconds 5 }
 } finally {
-    Write-Host "`nĐang dừng tunnel..." -ForegroundColor Yellow
+    Write-Host "`nDang dung tunnel..." -ForegroundColor Yellow
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 }

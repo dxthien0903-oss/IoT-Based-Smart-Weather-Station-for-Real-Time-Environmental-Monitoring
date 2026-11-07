@@ -89,6 +89,7 @@ IoT-Based-Smart-Weather-Station-for-Real-Time-Environmental-Monitoring/
     ├── simulate.js                Giả lập ESP8266 khi chưa có phần cứng
     ├── generate-cert.js           Tạo chứng thư tự ký cho HTTPS local
     ├── start-tunnel.ps1           Script chạy Cloudflare Tunnel (PowerShell)
+    ├── tunnel-url.txt             Link tunnel hiện tại (tự sinh bởi script, để ESP8266 đọc)
     ├── Caddyfile                  Cấu hình reverse proxy Caddy (Let's Encrypt)
     ├── package.json
     ├── .env.example               Mẫu cấu hình (giá trị giả)
@@ -732,8 +733,57 @@ tự kiểm tra chứng thư.
 ```
 
 > ⚠️ Vì quick tunnel đổi URL mỗi lần chạy lại, bạn phải **sửa lại `SERVER_URL`
-> và nạp lại firmware** mỗi khi muốn đổi link. Đây là lý do nên dùng named
-> tunnel hoặc Caddy cho bản demo chính thức.
+> và nạp lại firmware** mỗi khi muốn đổi link. Dùng cách 12B.7 để bỏ hẳn
+> việc này.
+
+### 12B.7. Giải quyết "URL đổi mỗi lần" — không cần nạp lại firmware
+
+Quick tunnel đổi URL mỗi lần chạy lại. Thay vì sửa `SERVER_URL` + nạp lại
+firmware, firmware có thể **tự tải link hiện tại từ một file trên GitHub**.
+
+Trong `secrets.h`, đặt `SERVER_URL` bắt đầu bằng dấu `@`:
+
+```cpp
+#define SERVER_URL "@https://raw.githubusercontent.com/USER/REPO/main/Backend/tunnel-url.txt"
+```
+
+Firmware sẽ:
+1. Tải file `tunnel-url.txt` từ GitHub (nội dung: 1 dòng, ví dụ
+   `https://abc-def.trycloudflare.com/api/sensors`)
+2. Dùng URL đó để gửi dữ liệu
+3. Làm mới lại mỗi 5 phút — nên khi bạn đổi link, ESP8266 tự nhận link mới
+
+**Quy trình đầy đủ:**
+
+```powershell
+# 1. Chạy tunnel (script tự ghi link vào Backend/tunnel-url.txt)
+cd Backend
+.\start-tunnel.ps1
+
+# 2. Đẩy file link lên GitHub (chỉ cần làm khi link đổi)
+git add Backend/tunnel-url.txt
+git commit -m "update tunnel url"
+git push
+
+# 3. ESP8266 tự lấy link mới trong vòng 5 phút — KHÔNG cần nạp lại firmware
+```
+
+> **Lưu ý**: GitHub có thể cache file RAW trong vài phút. Nếu ESP8266 chưa nhận
+> link mới, chờ thêm 5 phút hoặc thêm `?t=<số>` vào cuối URL trong
+> `tunnel-url.txt` để ép tải lại.
+
+> **Về file `tunnel-url.txt`**: file này được commit lên GitHub **cố ý** (không
+> chứa bí mật — chỉ là URL công khai của dashboard). Script dùng
+> `UTF8Encoding(false)` để không ghi BOM, vì `String.trim()` của Arduino không
+> loại BOM và sẽ đọc hỏng URL.
+
+**Một cách khác không cần GitHub** — dùng IP public cố định + DNS tự động:
+
+Nếu bạn có IP public tĩnh (IP nhà thuê bao), bạn có thể dùng một dịch vụ
+DNS động (Dynamic DNS) như `no-ip.com`, `duckdns.org`, `afraid.org` để trỏ
+`weather.ddns.net` về IP của bạn, rồi trỏ domain đó qua Cloudflare Tunnel.
+Khi đó `SERVER_URL` cố định mãi mãi mà vẫn **miễn phí**, không cần mua domain.
+Tuy nhiên cách này cần cấu hình thêm DNS, phức tạp hơn cho đồ án.
 
 ### 12B.6. Kiểm tra sau khi chuyển HTTPS
 

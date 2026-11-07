@@ -4,6 +4,22 @@
 // Bí mật Wi-Fi / API key nằm trong secrets.h (KHÔNG commit file đó).
 //
 // Hỗ trợ HTTP (LAN) và HTTPS (cloud) — chọn theo SERVER_URL trong secrets.h.
+//
+// ---------------------------------------------------------------------------
+// TỰ ĐỘNG LẤY SERVER_URL TỪ XA (không cần nạp lại firmware khi URL đổi)
+// ---------------------------------------------------------------------------
+// Nếu SERVER_URL trong secrets.h bắt đầu bằng "@", phần còn lại được hiểu là
+// URL của một file TEXT chứa địa chỉ server hiện tại. Ví dụ:
+//
+//   #define SERVER_URL "@https://raw.githubusercontent.com/USER/REPO/main/tunnel-url.txt"
+//
+// Firmware sẽ tải file đó (mỗi REFRESH_URL_MINUTES phút), đọc dòng đầu tiên
+// làm địa chỉ server. Nhờ vậy bạn có thể đổi link Cloudflare Tunnel
+// (quick tunnel đổi URL mỗi lần restart) mà KHÔNG cần nạp lại firmware —
+// chỉ cần cập nhật file tunnel-url.txt trên GitHub.
+//
+// Dùng cho demo đồ án: URL tĩnh trên GitHub + quick tunnel đổi ở server.
+// ---------------------------------------------------------------------------
 
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
@@ -22,17 +38,114 @@ DHT dht(DHTPIN, DHTTYPE);
 
 const unsigned long SEND_INTERVAL_MS = 10000; // 10 giây/lần
 const uint8_t WIFI_RETRY_MAX = 40;            // ~20 giây chờ Wi-Fi mỗi lần kết nối lại
+const unsigned long REFRESH_URL_MINUTES = 5;   // 5 phút làm mới SERVER_URL từ xa
 unsigned long lastSend = 0;
+unsigned long lastUrlFetch = 0;
 
-// Bật khi SERVER_URL bắt đầu bằng "https://"
-// CA_CERT: đặt chuỗi chứng thư root CA (dạng PEM, nhiều dòng) — bỏ trống thì dùng setInsecure().
-// setInsecure() KHÔNG kiểm tra chứng thư: chỉ dùng cho demo, không dùng cho production.
-#ifndef CA_CERT
-#define CA_CERT ""
-#endif
+// Địa chỉ server đang dùng (có thể được cập nhật từ xa)
+String currentServerUrl = "";
+String cachedUrl = "";       // giá trị đọc được từ file từ xa
+unsigned long cachedUrlAt = 0;
 
-bool serverIsHttps() {
-  return strncmp(SERVER_URL, "https://", 8) == 0;
+// Bật khi SERVER_URL bắt đầu bằng "@" -> lấy URL thật từ file từ xa
+bool serverUrlIsRemote() {
+  return strlen(SERVER_URL) > 1 && SERVER_URL[0] == '@';
+}
+String remoteUrlSource() {
+  return String(SERVER_URL).substring(1);
+}
+
+// Bật khi URL bắt đầu bằng "https://"
+bool urlIsHttps(const String &url) {
+  return url.startsWith("https://");
+}
+
+// ---------- Tải SERVER_URL từ file từ xa ----------
+// File chứa đúng 1 dòng: địa chỉ server (ví dụ https://abc.trycloudflare.com/api/sensors)
+//
+// Lưu ý: file được tạo bằng PowerShell/Windows có thể chứa BOM (UTF-8 BOM
+// = 3 byte EF BB BF). Arduino String.trim() KHÔNG loại BOM, nên ta tự lọc thủ công.
+String sanitizeRemoteUrl(String raw) {
+  // Cắt BOM và mọi ký tự điều khiển ở đầu
+  while (raw.length() > 0) {
+    char c = raw[0];
+    if ((unsigned char)c <= 0x20 || c == 0xEF || c == 0xBB || c == 0xBF) {
+      raw.remove(0, 1);
+    } else {
+      break;
+    }
+  }
+  // Lấy dòng đầu tiên
+  int nl = raw.indexOf('\n');
+  if (nl >= 0) raw = raw.substring(0, nl);
+  // Bỏ khoảng trắng thừa ở hai đầu
+  raw.trim();
+  return raw;
+}
+
+bool isValidRemoteUrl(const String &u) {
+  return u.startsWith("http://") || u.startsWith("https://");
+}
+
+void refreshServerUrlFromRemote() {
+  String source = remoteUrlSource();
+  if (source.length() == 0) return;
+
+  Serial.print("[URL] Đang tải cấu hình từ: ");
+  Serial.println(source);
+
+  HTTPClient http;
+  http.setTimeout(10000);
+  http.addHeader("Cache-Control", "no-cache"); // yêu cầu CDN không cache file cũ
+
+  WiFiClientSecure secureClient;
+  bool https = urlIsHttps(source);
+
+  if (https) {
+    secureClient.setInsecure();
+    http.begin(secureClient, source);
+  } else {
+    static WiFiClient plainClient;
+    http.begin(plainClient, source);
+  }
+
+  int code = http.GET();
+  if (code == 200) {
+    String body = http.getString();
+    http.end();
+    String candidate = sanitizeRemoteUrl(body);
+    if (isValidRemoteUrl(candidate)) {
+      cachedUrl = candidate;
+      cachedUrlAt = millis();
+      Serial.println("[URL] Đã cập nhật: " + cachedUrl);
+      return;
+    }
+    Serial.println("[URL] Nội dung file không phải URL hợp lệ, giữ link cũ.");
+  } else {
+    http.end();
+    Serial.printf("[URL] Tải thất bại (HTTP %d)\n", code);
+  }
+}
+
+// Chọn URL cần dùng: ưu tiên URL từ xa (nếu có), ngược lại dùng SERVER_URL cứng
+String resolveServerUrl() {
+  if (!serverUrlIsRemote()) {
+    return String(SERVER_URL);
+  }
+  // Còn cache hợp lệ -> dùng luôn
+  if (cachedUrl.length() > 0 &&
+      (millis() - cachedUrlAt) < REFRESH_URL_MINUTES * 60UL * 1000UL) {
+    return cachedUrl;
+  }
+  // Hết hạn -> thử tải lại; nếu thất bại thì dùng bản cache cũ (nếu có)
+  refreshServerUrlFromRemote();
+  if (cachedUrl.length() > 0) return cachedUrl;
+
+  // Không tải được và không có cache -> bỏ qua lần gửi này.
+  // KHÔNG dùng String(SERVER_URL).substring(1) làm fallback vì đó là URL của
+  // FILE từ xa (bắt đầu bằng http tới file txt), không phải API endpoint.
+  Serial.println("[URL] Chưa có link server hợp lệ, bỏ qua lần gửi này.");
+  return String("");
 }
 
 void connectWiFi() {
@@ -58,8 +171,13 @@ void setup() {
   dht.begin();
   pinMode(RAIN_PIN, INPUT);
   connectWiFi();
-  Serial.print("Giao thức: ");
-  Serial.println(serverIsHttps() ? "HTTPS" : "HTTP");
+
+  if (serverUrlIsRemote()) {
+    Serial.println("Chế độ: SERVER_URL lấy động từ file từ xa");
+    refreshServerUrlFromRemote();
+  } else {
+    Serial.println("Giao thức: " + (urlIsHttps(String(SERVER_URL)) ? "HTTPS" : "HTTP"));
+  }
 }
 
 void loop() {
@@ -95,12 +213,17 @@ void sendReading() {
   int rain = digitalRead(RAIN_PIN) == LOW ? 1 : 0; // nhiều module rain: LOW = có nước, kiểm tra lại theo module thực tế
   int rssi = WiFi.RSSI();
 
+  currentServerUrl = resolveServerUrl();
+  if (currentServerUrl.length() == 0) {
+    return; // chưa có link server hợp lệ -> bỏ qua lần gửi này
+  }
+
   HTTPClient http;
   http.setTimeout(10000); // TLS bắt tay cần lâu hơn HTTP thường
   http.addHeader("Content-Type", "application/json");
   http.addHeader("x-api-key", DEVICE_API_KEY);
 
-  if (serverIsHttps()) {
+  if (urlIsHttps(currentServerUrl)) {
     WiFiClientSecure secureClient;
     if (strlen(CA_CERT) > 0) {
       secureClient.setCACert(CA_CERT); // kiểm tra chứng thư — dùng cho production
@@ -108,10 +231,10 @@ void sendReading() {
       secureClient.setInsecure(); // demo only: không kiểm tra chứng thư
       Serial.println("[TLS] Không có CA_CERT — dùng setInsecure() (KHÔNG an toàn cho production)");
     }
-    http.begin(secureClient, SERVER_URL);
+    http.begin(secureClient, currentServerUrl);
   } else {
     WiFiClient plainClient;
-    http.begin(plainClient, SERVER_URL);
+    http.begin(plainClient, currentServerUrl);
   }
 
   String payload = "{";
@@ -124,7 +247,8 @@ void sendReading() {
   payload += "}";
 
   int httpCode = http.POST(payload);
-  Serial.printf("Gửi dữ liệu -> HTTP %d: %s\n", httpCode, payload.c_str());
+  Serial.printf("Gửi dữ liệu -> HTTP %d (%s): %s\n", httpCode,
+                 currentServerUrl.c_str(), payload.c_str());
 
   if (httpCode != 201) {
     Serial.println("Phản hồi: " + http.getString());
