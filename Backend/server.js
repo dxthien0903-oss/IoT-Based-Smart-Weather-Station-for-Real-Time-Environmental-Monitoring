@@ -27,7 +27,17 @@ if (API_KEY === 'demo-key-change-me') {
 
 // ---------- Google Gemini AI ----------
 let genAI = null;
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+// Thứ tự ưu tiên. Google thu hồi model không còn khả dụng (404) và
+// model có thể tạm quá tải (503) — vì vậy thử lần lượt từ trên xuống.
+// Ghi đè được qua biến môi trường GEMINI_MODELS (phân tách bằng dấu phẩy).
+const DEFAULT_GEMINI_MODELS = [
+  'gemini-3.5-flash',        // ổn định, nhanh, trả lời tiếng Việt tốt
+  'gemini-3.6-flash',        // dự phòng
+  'gemini-3.5-flash-lite',   // nhẹ nhất, fallback cuối
+];
+const GEMINI_MODELS = (process.env.GEMINI_MODELS
+  ? process.env.GEMINI_MODELS.split(',').map((m) => m.trim()).filter(Boolean)
+  : DEFAULT_GEMINI_MODELS);
 
 if (GEMINI_API_KEY) {
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -410,11 +420,28 @@ ${alertContext}`;
         if (reply) break;
       } catch (err) {
         lastError = err;
-        console.warn(`Model ${modelName} thất bại, đang thử model tiếp theo... (${String(err && err.message || err).slice(0, 80)})`);
+        const status = err && (err.status || err.statusCode);
+        const detail = String((err && err.message) || err).slice(0, 120);
+        // 404 = model bị thu hồi -> thử model khác ngay
+        // 429/503 = quá tải/hết quota -> thử model khác, có thể thành công
+        console.warn(`Model ${modelName} thất bại [${status || '?'}]: ${detail}`);
       }
     }
 
     if (!reply) {
+      // Phân loại lỗi để trả đúng mã và thông báo hữu ích
+      const status = lastError && (lastError.status || lastError.statusCode);
+      if (status === 404) {
+        return res.status(503).json({
+          error: 'Các model AI đã cấu hình không còn khả dụng. Hãy cập nhật GEMINI_MODELS trong file .env.',
+        });
+      }
+      if (status === 429) {
+        return res.status(429).json({ error: 'Đã vượt giới hạn gọi AI (quota). Vui lòng thử lại sau.' });
+      }
+      if (status === 400 && /api key/i.test(String((lastError && lastError.message) || ''))) {
+        return res.status(503).json({ error: 'GEMINI_API_KEY không hợp lệ. Hãy kiểm tra lại key trong file .env.' });
+      }
       throw lastError || new Error('Không nhận được phản hồi từ AI');
     }
 

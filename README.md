@@ -220,6 +220,7 @@ hiện bất thường, cung cấp API cho dashboard và phục vụ thư mục 
 | `DEVICE_API_KEY` | `demo-key-change-me` | "Mật khẩu" cho thiết bị gửi dữ liệu. Phải **giống hệt** `DEVICE_API_KEY` trong `secrets.h` của ESP8266. `simulate.js` tự đọc giá trị này từ `.env` |
 | `PORT` | `3000` | Cổng chạy server |
 | `GEMINI_API_KEY` | (rỗng) | Khóa Google Gemini cho chatbot. Bỏ trống thì `/api/chat` trả `503` |
+| `GEMINI_MODELS` | `gemini-3.5-flash,gemini-3.6-flash,gemini-3.5-flash-lite` | Danh sách model AI thử theo thứ tự. Google thu hồi model cũ (404) và có thể quá tải (503) — server tự fallback |
 | `OFFLINE_THRESHOLD_MS` | `30000` | Ngưỡng coi thiết bị là offline. Khớp với `connectionState.offlineThresholdMs` ở frontend |
 | `CORS_ORIGIN` | `*` | Cho phép origin gọi API. **Production: đặt domain dashboard**, ví dụ `https://weather.example.com` |
 | `DATA_RETENTION_DAYS` | `30` | Số ngày giữ dữ liệu đo. Cũ hơn sẽ tự xóa mỗi 6 giờ |
@@ -533,6 +534,29 @@ phù hợp với nơi lắp đặt. Cảm biến mưa chưa được kiểm tra 
 | Danh sách cảnh báo luôn rỗng | Chưa có số đo bất thường, hoặc chưa khởi động lại server sau khi sửa code; gửi thử `temp` = 85 |
 | Biểu đồ trống | Chưa có dữ liệu trong khoảng đã chọn: chọn khoảng dài hơn hoặc gửi thêm dữ liệu |
 | Điện thoại không vào được `http://IP:3000` | Cho phép Node.js qua firewall, hoặc dùng điểm phát Wi-Fi từ điện thoại (một số Wi-Fi chặn thiết bị giao tiếp với nhau) |
+
+### Chatbot AI trả lỗi
+
+| Triệu chứng | Nguyên nhân | Cách xử lý |
+|---|---|---|
+| `503` — "AI chưa được cấu hình" | Thiếu `GEMINI_API_KEY` trong `.env` | Thêm key rồi restart server |
+| `503` — "các model AI không còn khả dụng" | Model trong `GEMINI_MODELS` đã bị Google thu hồi (lỗi 404) | Google thường bỏ model cũ. Xem danh sách model hiện hành và cập nhật `GEMINI_MODELS` |
+| `429` — vượt quota | Hết hạn mức gọi miễn phí | Chờ reset hạn mức hoặc dùng key có billing |
+| `500` — lỗi chung | Xem log server, thường là model đang quá tải (503 tạm thời) | Server đã tự thử model dự phòng; nếu vẫn lỗi thì thử lại |
+
+**Cách xem model nào còn khả dụng:**
+
+```bash
+# Gọi trực tiếp API danh sách model
+curl "https://generativelanguage.googleapis.com/v1beta/models?key=YOUR_KEY"
+```
+
+Hoặc mở <https://aistudio.google.com/app/apikey> để xem model khả dụng cho key của bạn.
+
+> **Lưu ý**: danh sách model của Gemini thay đổi theo thời gian và theo tài khoản.
+> Đây là lý do `server.js` cấu hình **nhiều model và thử lần lượt** thay vì
+> phụ thuộc vào một tên model cố định. Khi Google thu hồi model, chỉ cần sửa
+> biến `GEMINI_MODELS` trong `.env` là xong — không phải đổi code.
 
 ## 12. Triển khai lên cloud (tùy chọn)
 
