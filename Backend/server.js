@@ -16,11 +16,12 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const OFFLINE_THRESHOLD_MS = 30 * 1000; // khớp với connectionState.offlineThresholdMs ở frontend
 
 // ---------- Google Gemini AI ----------
-let geminiModel = null;
+let genAI = null;
+const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+
 if (GEMINI_API_KEY) {
-  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-  console.log('Gemini AI đã được kích hoạt.');
+  genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  console.log('Gemini AI đã được khởi tạo với danh sách model ưu tiên:', GEMINI_MODELS.join(', '));
 } else {
   console.warn('GEMINI_API_KEY chưa được cấu hình. Chatbot AI sẽ không hoạt động.');
 }
@@ -217,7 +218,7 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'Vui lòng nhập câu hỏi.' });
   }
 
-  if (!geminiModel) {
+  if (!genAI) {
     return res.status(503).json({ error: 'AI chưa được cấu hình. Vui lòng thêm GEMINI_API_KEY vào file .env' });
   }
 
@@ -279,17 +280,34 @@ ${sensorContext}
 
 ${alertContext}`;
 
-    const result = await geminiModel.generateContent({
-      contents: [
-        { role: 'user', parts: [{ text: systemPrompt + '\n\nCâu hỏi của người dùng: ' + message.trim() }] }
-      ],
-      generationConfig: {
-        maxOutputTokens: 1024,
-        temperature: 0.7,
-      },
-    });
+    let reply = null;
+    let lastError = null;
 
-    const reply = result.response.text();
+    // Thử lần lượt các model cho đến khi thành công (tự động fallback nếu model quá tải)
+    for (const modelName of GEMINI_MODELS) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent({
+          contents: [
+            { role: 'user', parts: [{ text: systemPrompt + '\n\nCâu hỏi của người dùng: ' + message.trim() }] }
+          ],
+          generationConfig: {
+            maxOutputTokens: 1024,
+            temperature: 0.7,
+          },
+        });
+        reply = result.response.text();
+        if (reply) break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`Model ${modelName} thất bại, đang thử model tiếp theo... (${err.message.slice(0, 80)})`);
+      }
+    }
+
+    if (!reply) {
+      throw lastError || new Error('Không nhận được phản hồi từ AI');
+    }
+
     res.json({ reply });
   } catch (err) {
     console.error('Gemini API error:', err);

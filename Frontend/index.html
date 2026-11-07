@@ -8,21 +8,6 @@
     <link rel="stylesheet" href="css/style.css" />
   </head>
   <body>
-    <nav class="main-nav">
-      <a href="index.html" class="nav-link active">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        Dashboard
-      </a>
-      <a href="chatbot.html" class="nav-link">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        AI Chatbot
-      </a>
-      <a href="about.html" class="nav-link">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        Giới thiệu
-      </a>
-    </nav>
-
     <div class="page-shell">
       <header class="topbar">
         <div class="page-brand">
@@ -187,6 +172,50 @@
       <footer class="page-footer">Dữ liệu demo cho mục đích trình diễn giao diện.</footer>
     </div>
 
+    <!-- ===== Floating AI Chat Widget ===== -->
+    <button class="chat-fab" id="chat-fab" type="button" aria-label="Mở trợ lý AI">
+      <svg class="chat-fab-icon" id="fab-icon-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <svg class="chat-fab-icon hidden" id="fab-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      <span class="fab-label">AI</span>
+    </button>
+
+    <div class="chat-widget" id="chat-widget" aria-hidden="true">
+      <div class="chat-widget-header">
+        <div class="chat-widget-title">
+          <span class="chat-widget-ai-icon">🤖</span>
+          <div>
+            <strong>Trợ lý AI Thời tiết</strong>
+            <small>Hỏi đáp về dữ liệu cảm biến & thời tiết</small>
+          </div>
+        </div>
+        <button class="chat-widget-close" id="chat-widget-close" type="button" aria-label="Đóng">✕</button>
+      </div>
+
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-message assistant">
+          <div class="chat-avatar">🤖</div>
+          <div class="chat-bubble">
+            Xin chào! 👋 Tôi là trợ lý AI của hệ thống thời tiết IoT. Hãy hỏi tôi về dữ liệu cảm biến, thời tiết hoặc cảnh báo nhé! 😊
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-quick-actions" id="chat-quick-actions">
+        <button class="chat-quick-btn" data-q="Thời tiết hiện tại như thế nào?">🌤️ Thời tiết</button>
+        <button class="chat-quick-btn" data-q="Phân tích nhiệt độ và độ ẩm hôm nay">📊 Phân tích</button>
+        <button class="chat-quick-btn" data-q="Có cảnh báo bất thường nào không?">⚠️ Cảnh báo</button>
+        <button class="chat-quick-btn" data-q="Cho tôi lời khuyên sức khỏe dựa trên thời tiết">💡 Sức khỏe</button>
+      </div>
+
+      <div class="chat-input-bar">
+        <textarea id="chat-input" placeholder="Nhập câu hỏi..." rows="1"></textarea>
+        <button class="chat-send-btn" id="chat-send-btn" type="button" aria-label="Gửi">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+
     <script src="js/dashboard.js"></script>
+    <script src="js/chatwidget.js"></script>
   </body>
 </html>
