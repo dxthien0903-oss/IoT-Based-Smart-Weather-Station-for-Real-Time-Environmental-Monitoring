@@ -747,6 +747,13 @@ Trong `secrets.h`, đặt `SERVER_URL` bắt đầu bằng dấu `@`:
 #define SERVER_URL "@https://raw.githubusercontent.com/USER/REPO/main/Backend/tunnel-url.txt"
 ```
 
+> **Repo của dự án này đã dùng sẵn cấu hình này:**
+> ```cpp
+> #define SERVER_URL "@https://raw.githubusercontent.com/dxthien0903-oss/IoT-Based-Smart-Weather-Station-for-Real-Time-Environmental-Monitoring/main/Backend/tunnel-url.txt"
+> ```
+> File `Backend/tunnel-url.txt` đã được commit và truy cập được qua GitHub Raw
+> (đã kiểm tra: HTTP 200, không có BOM).
+
 Firmware sẽ:
 1. Tải file `tunnel-url.txt` từ GitHub (nội dung: 1 dòng, ví dụ
    `https://abc-def.trycloudflare.com/api/sensors`)
@@ -776,6 +783,39 @@ git push
 > chứa bí mật — chỉ là URL công khai của dashboard). Script dùng
 > `UTF8Encoding(false)` để không ghi BOM, vì `String.trim()` của Arduino không
 > loại BOM và sẽ đọc hỏng URL.
+
+### 12B.8. Vận hành hằng ngày (tóm tắt)
+
+Với cấu hình `SERVER_URL` dạng `@...` (mục 12B.7), bạn chỉ cần:
+
+```powershell
+# Terminal 1 — backend
+cd Backend
+npm start
+
+# Terminal 2 — tunnel (tự ghi link vào tunnel-url.txt)
+cd Backend
+.\start-tunnel.ps1
+
+# Terminal 3 — simulator (chỉ khi chưa có phần cứng thật)
+cd Backend
+npm run simulate
+```
+
+Khi link tunnel đổi (mỗi lần restart `start-tunnel.ps1`):
+
+```powershell
+git add Backend/tunnel-url.txt
+git commit -m "update tunnel url"
+git push
+```
+
+ESP8266 tự nhận link mới trong vòng 5 phút. **Không cần nạp lại firmware.**
+
+> **Lưu ý vận hành**: quick tunnel chỉ sống khi tiến trình `cloudflared` chạy.
+> Nếu tắt máy hoặc đóng terminal, link sẽ chết và ESP8266 báo lỗi gửi dữ liệu.
+> Với bản demo chính thức, hãy cân nhắc dùng named tunnel hoặc Render
+> (xem mục 12B.1) để server chạy 24/7.
 
 **Một cách khác không cần GitHub** — dùng IP public cố định + DNS tự động:
 
