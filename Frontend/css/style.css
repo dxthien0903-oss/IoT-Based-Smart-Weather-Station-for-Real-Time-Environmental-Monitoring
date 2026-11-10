@@ -212,6 +212,17 @@ h1, h2, h3 { font-weight: 600; letter-spacing: -0.02em; }
 }
 .brand-mark svg { width: 21px; height: 21px; }
 
+.brand-mark--new {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  box-shadow: 0 4px 18px rgba(56, 189, 248, 0.35), 0 0 0 3px rgba(63, 208, 201, 0.08);
+}
+.brand-mark--new svg { width: 100%; height: 100%; }
+
 .brand-text { min-width: 0; }
 
 .brand-text h1 {
