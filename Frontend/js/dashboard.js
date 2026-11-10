@@ -264,8 +264,8 @@
     $('value-temp').textContent = latest.temp == null ? '--' : latest.temp.toFixed(1);
     $('value-hum').textContent = latest.hum == null ? '--' : Math.round(latest.hum);
     $('value-light').textContent = latest.light == null ? '--' : Math.round(latest.light);
-    $('value-rain').textContent = latest.rain == null ? '--' : (latest.rain ? 'Có mưa' : 'Khô ráo');
-    $('rain-unit').textContent = latest.rain == null ? 'trạng thái' : (latest.rain ? 'đang mưa' : 'khô ráo');
+    $('value-rain').textContent = latest.rain == null ? '--' : (latest.rain ? '1' : '0');
+    $('rain-unit').textContent = '/ 1';
 
     setTrend('trend-temp', 'temp', '°C');
     setTrend('trend-hum', 'hum', '%');
@@ -573,7 +573,7 @@
               position: 'top',
               align: 'end',
               labels: {
-                color: '#a4b4c4',
+                color: 'rgba(255,255,255,0.92)',
                 usePointStyle: true,
                 pointStyle: 'circle',
                 boxWidth: 7,
@@ -587,7 +587,7 @@
               borderColor: '#33465a',
               borderWidth: 1,
               titleColor: '#e9eff5',
-              bodyColor: '#a4b4c4',
+              bodyColor: 'rgba(255,255,255,0.85)',
               padding: 10,
               cornerRadius: 8,
               displayColors: true,
