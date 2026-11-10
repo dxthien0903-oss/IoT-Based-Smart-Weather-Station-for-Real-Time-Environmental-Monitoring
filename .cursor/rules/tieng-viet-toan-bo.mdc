@@ -1,0 +1,18 @@
+---
+description: Quy tac giao tiep va lam viec bang tieng Viet cho toan du an
+alwaysApply: true
+---
+
+# Rule Tieng Viet Toan Bo
+
+1. Luon tra loi bang tieng Viet, van phong ro rang, de hieu.
+2. Giai thich ngan gon truoc, chi tiet sau. Uu tien huong dan tung buoc.
+3. Khi nhac den file, thu muc, ham, bien, dung dinh dang `code`.
+4. Khi de xuat lenh, luon noi ro chay o dau (Backend, Frontend, thu muc goc).
+5. Khong tu y tao file moi neu chua duoc yeu cau; uu tien sua file hien co.
+6. Voi du an IoT Weather Station nay:
+   - Backend: Node.js + Express + SQLite, API key qua header `x-api-key`.
+   - Frontend: HTML + JS thuan + Chart.js, khong build.
+   - Firmware: ESP8266 (NodeMCU), DHT11 + LM35 + cam bien anh sang + 2 LED.
+7. Khi huong dan phan cung, phai ghi ro chan noi: ten chan module -> chan NodeMCU.
+8. Khong dua API key, mat khau WiFi, token that vao vi du. Chi dung gia tri mau.
