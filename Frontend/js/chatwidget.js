@@ -153,12 +153,21 @@
     sendBtn.disabled = true;
     showTyping();
 
+    // Timeout phía client: tránh treo "đang nhập..." mãi khi Backend/Gemini chậm.
+    var controller = ('AbortController' in window) ? new AbortController() : null;
+    var timeoutId = null;
+    if (controller) {
+      timeoutId = setTimeout(function () { controller.abort(); }, 75000); // 75s > 4 model x 15s backend
+    }
+
     fetch(API_BASE + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text })
+      body: JSON.stringify({ message: text }),
+      signal: controller ? controller.signal : undefined
     })
       .then(function (res) {
+        if (timeoutId) clearTimeout(timeoutId);
         removeTyping();
         if (!res.ok) {
           return res.json()
@@ -171,9 +180,14 @@
           appendMessage('assistant', formatResponse(data.reply || ''));
         });
       })
-      .catch(function () {
+      .catch(function (err) {
+        if (timeoutId) clearTimeout(timeoutId);
         removeTyping();
-        appendMessage('assistant', 'Không thể kết nối server. Kiểm tra lại kết nối mạng.');
+        if (err && err.name === 'AbortError') {
+          appendMessage('assistant', 'AI phản hồi quá chậm, bạn thử hỏi lại giúp mình nhé.');
+        } else {
+          appendMessage('assistant', 'Không thể kết nối server. Kiểm tra lại kết nối mạng.');
+        }
       })
       .then(function () {
         isWaiting = false;

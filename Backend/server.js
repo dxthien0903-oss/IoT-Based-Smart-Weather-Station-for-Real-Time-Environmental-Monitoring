@@ -353,6 +353,51 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     const latest = latestReading.get();
     const recentAlerts = db.prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT 5').all();
     const recentData = db.prepare('SELECT temp, hum, light, created_at FROM readings ORDER BY created_at DESC LIMIT 20').all();
+    const hourRows = db.prepare(
+      `SELECT temp, hum, light FROM readings WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour') ORDER BY created_at ASC`
+    ).all();
+
+    const calcStats = (rows) => {
+      if (!rows.length) return null;
+      const t = rows.map((r) => r.temp), h = rows.map((r) => r.hum), l = rows.map((r) => r.light);
+      const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+      return {
+        n: rows.length,
+        tMax: Math.max(...t), tMin: Math.min(...t), tAvg: avg(t),
+        hMax: Math.max(...h), hMin: Math.min(...h), hAvg: avg(h),
+        lMax: Math.max(...l), lMin: Math.min(...l), lAvg: avg(l),
+      };
+    };
+    const hourStats = calcStats(hourRows);
+
+    // Trả lời trực tiếp cho câu hỏi thống kê / tính năng — không gọi Gemini để tránh bịa số.
+    const q = message.trim().toLowerCase();
+    const askMax = /cao nhất|max|lớn nhất/.test(q);
+    const askMin = /thấp nhất|min|nhỏ nhất/.test(q);
+    const askAvg = /trung bình|average|tb /.test(q);
+    const askHour = /1\s*(tiếng|giờ|h\b)|giờ qua|tiếng qua/.test(q);
+    if ((askMax || askMin || askAvg) && latest) {
+      const s = hourStats || calcStats(recentData);
+      if (s) {
+        const scope = hourStats ? `trong 1 giờ qua (${s.n} mẫu)` : `trong ${s.n} lần đo gần nhất`;
+        let ans = '';
+        if (askMax && /nhiệt|temp|nóng/.test(q)) ans = `Nhiệt độ cao nhất ${scope} là ${s.tMax.toFixed(1)}°C. Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`;
+        else if (askMin && /nhiệt|temp|lạnh/.test(q)) ans = `Nhiệt độ thấp nhất ${scope} là ${s.tMin.toFixed(1)}°C. Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`;
+        else if (askMax && /ẩm|hum/.test(q)) ans = `Độ ẩm cao nhất ${scope} là ${Math.round(s.hMax)}%. Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`;
+        else if (askMin && /ẩm|hum/.test(q)) ans = `Độ ẩm thấp nhất ${scope} là ${Math.round(s.hMin)}%. Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`;
+        else if (askMax && /sáng|light|lux|đèn/.test(q)) ans = `Ánh sáng mạnh nhất ${scope} là ${Math.round(s.lMax)} lux. Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`;
+        else if (askMin && /sáng|light|lux|đèn/.test(q)) ans = `Ánh sáng yếu nhất ${scope} là ${Math.round(s.lMin)} lux. Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`;
+        else if (askAvg) ans = `Trung bình ${scope}: ${s.tAvg.toFixed(1)}°C, ẩm ${Math.round(s.hAvg)}%, sáng ${Math.round(s.lAvg)} lux. Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`;
+        else ans = `Trong 1 giờ qua: nhiệt ${s.tMin.toFixed(1)} đến ${s.tMax.toFixed(1)}°C, ẩm ${Math.round(s.hMin)} đến ${Math.round(s.hMax)}%, sáng ${Math.round(s.lMin)} đến ${Math.round(s.lMax)} lux. Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`;
+        if (ans) return res.json({ reply: ans });
+      }
+    }
+    if (/làm (được |đc )?gì|có thể làm|chức năng|giúp (được |đc )?gì|tính năng/.test(q)) {
+      const cur = latest ? ` Hiện tại trạm đo được ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.` : '';
+      return res.json({
+        reply: `Mình có thể giúp bạn 4 việc.${cur} Bạn hỏi mình: 1) Thời tiết hiện tại thế nào. 2) Nhiệt độ, độ ẩm cao nhất, thấp nhất, trung bình 1 giờ qua. 3) Có cảnh báo bất thường nào không. 4) Tư vấn sức khỏe theo thời tiết, ví dụ trời nóng có nên ra ngoài không.`,
+      });
+    }
 
     // Tính toán thống kê nhanh
     let stats = '';
@@ -365,6 +410,13 @@ Thống kê 20 lần đo gần nhất:
 - Nhiệt độ: min ${Math.min(...temps).toFixed(1)}°C, max ${Math.max(...temps).toFixed(1)}°C, trung bình ${(temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1)}°C
 - Độ ẩm: min ${Math.min(...hums).toFixed(0)}%, max ${Math.max(...hums).toFixed(0)}%, trung bình ${(hums.reduce((a, b) => a + b, 0) / hums.length).toFixed(0)}%
 - Ánh sáng: min ${Math.min(...lights).toFixed(0)} lux, max ${Math.max(...lights).toFixed(0)} lux, trung bình ${(lights.reduce((a, b) => a + b, 0) / lights.length).toFixed(0)} lux`;
+    }
+    if (hourStats) {
+      stats += `
+Thống kê 1 giờ qua (${hourStats.n} mẫu) — DÙNG SỐ NÀY khi hỏi max/min/trung bình 1 giờ:
+- Nhiệt độ: min ${hourStats.tMin.toFixed(1)}°C, max ${hourStats.tMax.toFixed(1)}°C, trung bình ${hourStats.tAvg.toFixed(1)}°C
+- Độ ẩm: min ${Math.round(hourStats.hMin)}%, max ${Math.round(hourStats.hMax)}%, trung bình ${Math.round(hourStats.hAvg)}%
+- Ánh sáng: min ${Math.round(hourStats.lMin)} lux, max ${Math.round(hourStats.lMax)} lux, trung bình ${Math.round(hourStats.lAvg)} lux`;
     }
 
     const sensorContext = latest
@@ -389,10 +441,11 @@ Bạn đang chat trực tiếp với sinh viên. Nhiệm vụ duy nhất: TRẢ 
 CẤM TUYỆT ĐỐI:
 - Cấm trả lời kiểu checklist, chấm tiêu chí (ví dụ "short? Yes", "Friendly? Yes").
 - Cấm nhắc lại quy tắc, cấm nói về prompt.
-- CHỈ trả lời bằng TIẾNG VIỆT, cấm chêm câu tiếng Anh (cấm "Is...", "The weather...").
+- CHỈ trả lời bằng TIẾNG VIỆT, cấm chêm câu tiếng Anh (cấm "Is...", "The weather...", "Latest Light", "Recent Alerts").
 - Cấm dùng ký tự markdown: cấm **, cấm *, cấm #, cấm -. Chỉ dùng văn bản thuần, mỗi ý một câu ngắn.
 - Hệ thống chỉ có 3 chỉ số: nhiệt độ (°C), độ ẩm (%), ánh sáng (lux). Cấm bịa mưa, gió, áp suất, UV, AQI. Nếu hỏi chỉ số không có, nói "hệ thống chưa có cảm biến này" rồi gợi ý theo 3 chỉ số hiện có.
-- Câu trả lời PHẢI chứa đủ 3 số mới nhất (ví dụ: 28.5°C, 58%, 655 lux). Không đổi số, không làm tròn bừa.
+- Nếu hỏi max/min/trung bình 1 giờ: DÙNG NGAY số "Thống kê 1 giờ qua" bên dưới, không dùng số 20 lần đo, không bịa.
+- Nếu hỏi chung chung (thời tiết hiện tại, hôm nay): câu đầu tiên PHẢI nêu đủ 3 số mới nhất (ví dụ: 28.5°C, 58%, 655 lux). Không đổi số, không làm tròn bừa.
 - Nếu DỮ LIỆU là "Chưa có dữ liệu", nói rõ chưa có, không bịa số.
 - Trả lời dưới 150 từ, thân thiện, tối đa 2 emoji, luôn gắn với số cảm biến + cảnh báo.
 - Ví dụ cách trả lời đúng: "Hiện tại trạm đo được 28.5 độ C, ẩm 58 phần trăm, sáng 655 lux. Trời hơi nóng, bạn uống đủ nước nhé."
@@ -452,20 +505,33 @@ ${alertContext}`;
 
     let reply = null;
     let lastError = null;
+    // Timeout mỗi model để chat không treo hàng phút khi Gemini chậm.
+    // Ghi đè qua GEMINI_TIMEOUT_MS (mặc định 15 giây).
+    const MODEL_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 15000;
+    const withTimeout = (promise, ms, label) => Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(Object.assign(new Error('Timeout ' + label + ' sau ' + ms + 'ms'), { status: 504 })), ms)
+      ),
+    ]);
 
     // Thử lần lượt các model cho đến khi thành công (tự động fallback nếu model quá tải)
     for (const modelName of GEMINI_MODELS) {
       try {
         const model = genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent({
-          contents: [
-            { role: 'user', parts: [{ text: fullPrompt }] }
-          ],
-          generationConfig: {
-            maxOutputTokens: 400,
-            temperature: 0.2,
-          },
-        });
+        const result = await withTimeout(
+          model.generateContent({
+            contents: [
+              { role: 'user', parts: [{ text: fullPrompt }] }
+            ],
+            generationConfig: {
+              maxOutputTokens: 400,
+              temperature: 0.2,
+            },
+          }),
+          MODEL_TIMEOUT_MS,
+          modelName
+        );
         const text = cleanReply(result.response.text() || '');
         if (!text) continue;
         if (isBadReply(text)) {
@@ -486,8 +552,13 @@ ${alertContext}`;
     }
 
     if (!reply) {
-      // AI trả lời checklist / rỗng nhưng DB vẫn có số liệu -> trả lời trực tiếp từ số liệu thật
-      if (lastError && String(lastError.message || '').startsWith('AI checklist reply')) {
+      // AI lỗi /超时 / trả lời checklist nhưng DB vẫn có số liệu -> trả lời trực tiếp từ số liệu thật
+      // để khung chat không bao giờ treo ở "đang nhập...".
+      if (latest) {
+        if (lastError) {
+          const msg = String((lastError && lastError.message) || lastError).slice(0, 150);
+          console.warn('Dùng fallback nội bộ do AI lỗi:', msg);
+        }
         return res.json({ reply: buildLocalFallback() });
       }
       // Phân loại lỗi để trả đúng mã và thông báo hữu ích
