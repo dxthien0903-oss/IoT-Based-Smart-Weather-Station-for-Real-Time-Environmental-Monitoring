@@ -31,7 +31,6 @@ async function send() {
     temp: +t.toFixed(1),
     hum: +hum.toFixed(0),
     light: +light.toFixed(0),
-    rain: Math.random() < 0.1 ? 1 : 0,
     device_id: 'ESP8266-WX01',
     rssi: -50 - Math.floor(Math.random() * 10),
   };

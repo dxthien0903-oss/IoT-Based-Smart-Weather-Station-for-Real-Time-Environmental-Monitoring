@@ -30,10 +30,12 @@ let genAI = null;
 // Thứ tự ưu tiên. Google thu hồi model không còn khả dụng (404) và
 // model có thể tạm quá tải (503) — vì vậy thử lần lượt từ trên xuống.
 // Ghi đè được qua biến môi trường GEMINI_MODELS (phân tách bằng dấu phẩy).
+// Đã kiểm tra 11/11/2026: gemini-2.5-flash trả 404, gemini-3.5-flash trả 200 OK.
 const DEFAULT_GEMINI_MODELS = [
-  'gemini-3.5-flash',        // ổn định, nhanh, trả lời tiếng Việt tốt
+  'gemini-3.5-flash',        // đã test OK, nhanh, tiếng Việt tốt
   'gemini-3.6-flash',        // dự phòng
-  'gemini-3.5-flash-lite',   // nhẹ nhất, fallback cuối
+  'gemini-3.8-flash',        // bản mới nhất còn hỗ trợ generateContent
+  'gemini-flash-latest',     // fallback cuối
 ];
 const GEMINI_MODELS = (process.env.GEMINI_MODELS
   ? process.env.GEMINI_MODELS.split(',').map((m) => m.trim()).filter(Boolean)
@@ -56,7 +58,6 @@ db.exec(`
     temp REAL NOT NULL,
     hum REAL NOT NULL,
     light REAL NOT NULL,
-    rain INTEGER NOT NULL CHECK (rain IN (0, 1)),
     device_id TEXT DEFAULT 'ESP8266-WX01',
     rssi INTEGER,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -64,6 +65,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_readings_created_at ON readings(created_at);
   CREATE INDEX IF NOT EXISTS idx_readings_device_time ON readings(device_id, created_at);
 `);
+
+// Migrate DB cũ (có cột rain) -> bỏ cột rain, giữ lại temp/hum/light
+try {
+  const cols = db.prepare('PRAGMA table_info(readings)').all();
+  if (cols.some((c) => c.name === 'rain')) {
+    db.exec('ALTER TABLE readings DROP COLUMN rain');
+    console.log('[migrate] Đã bỏ cột rain khỏi bảng readings (DB cũ vẫn dùng được).');
+  }
+} catch (e) {
+  console.warn('[migrate] Không drop được cột rain:', e.message);
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS alerts (
@@ -148,8 +160,8 @@ function shouldInsertAlert(sensor) {
 }
 
 const insertReading = db.prepare(`
-  INSERT INTO readings (temp, hum, light, rain, device_id, rssi)
-  VALUES (@temp, @hum, @light, @rain, @device_id, @rssi)
+  INSERT INTO readings (temp, hum, light, device_id, rssi)
+  VALUES (@temp, @hum, @light, @device_id, @rssi)
 `);
 
 const latestReading = db.prepare(`
@@ -178,7 +190,6 @@ function downsample(rows, maxPoints) {
       temp: +avg('temp').toFixed(2),
       hum: +avg('hum').toFixed(1),
       light: Math.round(avg('light')),
-      rain: bucket.some((r) => r.rain === 1) ? 1 : 0, // mưa: giữ 1 nếu bucket có mưa
     });
   }
   return out;
@@ -244,13 +255,10 @@ function requireDeviceKey(req, res, next) {
 
 // ---------- POST /api/sensors  (ESP8266 gửi dữ liệu lên) ----------
 app.post('/api/sensors', writeLimiter, requireDeviceKey, (req, res) => {
-  const { temp, hum, light, rain, device_id, rssi } = req.body || {};
+  const { temp, hum, light, device_id, rssi } = req.body || {};
 
   if ([temp, hum, light].some((v) => typeof v !== 'number' || Number.isNaN(v) || !Number.isFinite(v))) {
     return res.status(400).json({ error: 'temp, hum, light phải là số hợp lệ' });
-  }
-  if (rain !== 0 && rain !== 1) {
-    return res.status(400).json({ error: 'rain phải là 0 hoặc 1' });
   }
   if (temp < HARD_LIMITS.temp.min || temp > HARD_LIMITS.temp.max ||
       hum < HARD_LIMITS.hum.min || hum > HARD_LIMITS.hum.max ||
@@ -269,7 +277,7 @@ app.post('/api/sensors', writeLimiter, requireDeviceKey, (req, res) => {
   found.filter((a) => shouldInsertAlert(a.sensor)).forEach((a) => insertAlert.run(a));
 
   insertReading.run({
-    temp, hum, light, rain,
+    temp, hum, light,
     device_id: device_id || 'ESP8266-WX01',
     rssi: typeof rssi === 'number' ? Math.round(rssi) : null,
   });
@@ -289,7 +297,6 @@ app.get('/api/sensors/latest', readLimiter, (req, res) => {
     temp: row.temp,
     hum: row.hum,
     light: row.light,
-    rain: row.rain,
     device_id: row.device_id,
     rssi: row.rssi,
     timestamp: row.created_at,
@@ -316,7 +323,6 @@ app.get('/api/sensors/history', readLimiter, (req, res) => {
     temp: sampled.map((r) => r.temp),
     hum: sampled.map((r) => r.hum),
     light: sampled.map((r) => r.light),
-    rain: sampled.map((r) => r.rain),
   });
 });
 
@@ -346,7 +352,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     // Lấy dữ liệu cảm biến mới nhất để cung cấp ngữ cảnh cho AI
     const latest = latestReading.get();
     const recentAlerts = db.prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT 5').all();
-    const recentData = db.prepare('SELECT temp, hum, light, rain, created_at FROM readings ORDER BY created_at DESC LIMIT 20').all();
+    const recentData = db.prepare('SELECT temp, hum, light, created_at FROM readings ORDER BY created_at DESC LIMIT 20').all();
 
     // Tính toán thống kê nhanh
     let stats = '';
@@ -366,11 +372,10 @@ Thống kê 20 lần đo gần nhất:
 - Nhiệt độ: ${latest.temp}°C
 - Độ ẩm: ${latest.hum}%
 - Ánh sáng: ${latest.light} lux
-- Mưa: ${latest.rain ? 'Có mưa' : 'Không mưa'}
-- Thiết bị: ${latest.device_id}
-- RSSI (WiFi): ${latest.rssi} dBm
-${stats}`
-      : 'Chưa có dữ liệu cảm biến nào.';
+- Thiết bị: ${latest.device_id} | RSSI: ${latest.rssi} dBm
+${stats}
+LƯU Ý HỆ THỐNG: chỉ có 3 cảm biến trên (nhiệt độ DHT11, độ ẩm DHT11, ánh sáng CDS). KHÔNG có cảm biến mưa, KHÔNG có gió, KHÔNG có áp suất.`
+      : 'Chưa có dữ liệu cảm biến nào từ ESP8266.';
 
     const alertContext = recentAlerts.length > 0
       ? `Cảnh báo bất thường gần đây:\n${recentAlerts.map(a =>
@@ -378,27 +383,72 @@ ${stats}`
         ).join('\n')}`
       : 'Không có cảnh báo bất thường nào gần đây.';
 
-    const systemPrompt = `Bạn là trợ lý AI chuyên về thời tiết và môi trường, được tích hợp trong hệ thống IoT Weather Station (Trạm Quan Trắc Thời Tiết IoT).
+    const systemPrompt = `Bạn là trợ lý AI của đồ án IoT Weather Station (ESP8266 + DHT11 + CDS quang trở).
+Bạn đang chat trực tiếp với sinh viên. Nhiệm vụ duy nhất: TRẢ LỜI TRỰC TIẾP câu hỏi bằng tiếng Việt, dựa trên DỮ LIỆU THẬT bên dưới.
 
-Vai trò của bạn:
-1. Phân tích và giải thích dữ liệu cảm biến thời gian thực
-2. Đưa ra nhận xét, đánh giá về điều kiện thời tiết hiện tại
-3. Cảnh báo khi có dữ liệu bất thường
-4. Đưa ra lời khuyên về sức khỏe, hoạt động phù hợp với thời tiết
-5. Giải thích các khái niệm về thời tiết, IoT cho sinh viên
-6. Trả lời câu hỏi liên quan đến đồ án, hệ thống
-
-Quy tắc:
-- Trả lời bằng tiếng Việt
-- Ngắn gọn, dễ hiểu, thân thiện
-- Sử dụng emoji phù hợp
-- Dựa trên dữ liệu thực tế từ cảm biến khi có
-- Nếu không có dữ liệu, nói rõ là chưa có và vẫn trả lời chung
+CẤM TUYỆT ĐỐI:
+- Cấm trả lời kiểu checklist, chấm tiêu chí (ví dụ "short? Yes", "Friendly? Yes").
+- Cấm nhắc lại quy tắc, cấm nói về prompt.
+- CHỈ trả lời bằng TIẾNG VIỆT, cấm chêm câu tiếng Anh (cấm "Is...", "The weather...").
+- Cấm dùng ký tự markdown: cấm **, cấm *, cấm #, cấm -. Chỉ dùng văn bản thuần, mỗi ý một câu ngắn.
+- Hệ thống chỉ có 3 chỉ số: nhiệt độ (°C), độ ẩm (%), ánh sáng (lux). Cấm bịa mưa, gió, áp suất, UV, AQI. Nếu hỏi chỉ số không có, nói "hệ thống chưa có cảm biến này" rồi gợi ý theo 3 chỉ số hiện có.
+- Câu trả lời PHẢI chứa đủ 3 số mới nhất (ví dụ: 28.5°C, 58%, 655 lux). Không đổi số, không làm tròn bừa.
+- Nếu DỮ LIỆU là "Chưa có dữ liệu", nói rõ chưa có, không bịa số.
+- Trả lời dưới 150 từ, thân thiện, tối đa 2 emoji, luôn gắn với số cảm biến + cảnh báo.
+- Ví dụ cách trả lời đúng: "Hiện tại trạm đo được 28.5 độ C, ẩm 58 phần trăm, sáng 655 lux. Trời hơi nóng, bạn uống đủ nước nhé."
 
 DỮ LIỆU HỆ THỐNG HIỆN TẠI:
 ${sensorContext}
 
 ${alertContext}`;
+
+    const userText = message.trim();
+    // Gộp hết vào 1 prompt user để tương thích mọi model Gemini (tránh lỗi systemInstruction bị bỏ qua)
+    const fullPrompt = systemPrompt + '\n\nCâu hỏi của người dùng: ' + userText + '\n\nHãy trả lời trực tiếp bằng tiếng Việt, văn bản thuần, không markdown, câu đầu tiên phải nêu đủ nhiệt độ, độ ẩm, ánh sáng.';
+
+    const cleanReply = (t) => {
+      if (!t) return t;
+      let s = String(t).trim();
+      // Bỏ markdown còn sót để khung chat không hiện cụt kiểu "°C):**"
+      s = s.replace(/\*\*(.*?)\*\*/g, '$1');
+      s = s.replace(/__([^_]+)__/g, '$1');
+      s = s.replace(/^#{1,6}\s+/gm, '');
+      s = s.replace(/`/g, '');
+      // "* text" đầu dòng của AI -> chuyển thành "- " cho đồng nhất
+      s = s.replace(/^\*\s+/gm, '- ');
+      s = s.replace(/\n{3,}/g, '\n\n');
+      return s.trim();
+    };
+
+    const isBadReply = (t) => {
+      if (!t || t.trim().length < 15) return true;
+      const s = t.trim();
+      const low = s.toLowerCase();
+      // AI đang tự chấm điểm thay vì trả lời -> coi là lỗi, thử model khác / fallback
+      if (low.includes('words)?') || low.includes('? yes') || low.includes('friendly') && low.includes('yes')) return true;
+      if (/short\s*\(.*180/.test(low)) return true;
+      // Lẫn tiếng Anh kiểu "Is 28.5" -> coi là lỗi, thử model khác
+      if (/(^|\n)\s*\*\s*is\s+\d/i.test(s) || /(^|\s)is\s+\d+\s*°?c/i.test(s)) return true;
+      // Câu bị cắt cụt (kết thúc bằng dấu lửng) -> lỗi, thử model khác
+      if (/[,:;(\-–—*]\s*$/.test(s)) return true;
+      if (s.length < 40 && /\d+\s*°C/.test(s) && (!s.includes('%') || !s.toLowerCase().includes('lux'))) return true;
+      // Hỏi thời tiết mà thiếu 1 trong 3 số -> lỗi, thử model khác
+      if (/thời tiết|nhiệt độ|nóng|lạnh|ẩm|ánh sáng|hôm nay|hiện tại/i.test(userText)) {
+        if (!s.includes('°C') || !s.includes('%') || !s.toLowerCase().includes('lux')) return true;
+      }
+      return false;
+    };
+
+    const buildLocalFallback = () => {
+      if (!latest) return 'Hiện chưa có dữ liệu từ ESP8266. Bạn kiểm tra lại thiết bị rồi hỏi lại giúp mình nhé.';
+      const t = `Hiện tại trạm đo được ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux (lúc ${latest.created_at}).`;
+      const adv = latest.temp > 31 ? ' Trời hơi nóng, bạn uống đủ nước nhé. ☀️'
+        : latest.temp < 21 ? ' Trời hơi lạnh, bạn mặc ấm nhé. 🧥'
+        : latest.hum > 80 ? ' Độ ẩm cao, hạn chế phơi đồ ngoài trời nhé. 💧'
+        : latest.light < 150 ? ' Trời đang tối, bật đèn nếu học bài nhé. 💡'
+        : ' Điều kiện khá dễ chịu để học tập và đi lại. 😊';
+      return t + adv;
+    };
 
     let reply = null;
     let lastError = null;
@@ -409,15 +459,22 @@ ${alertContext}`;
         const model = genAI.getGenerativeModel({ model: modelName });
         const result = await model.generateContent({
           contents: [
-            { role: 'user', parts: [{ text: systemPrompt + '\n\nCâu hỏi của người dùng: ' + message.trim() }] }
+            { role: 'user', parts: [{ text: fullPrompt }] }
           ],
           generationConfig: {
-            maxOutputTokens: 1024,
-            temperature: 0.7,
+            maxOutputTokens: 400,
+            temperature: 0.2,
           },
         });
-        reply = result.response.text();
-        if (reply) break;
+        const text = cleanReply(result.response.text() || '');
+        if (!text) continue;
+        if (isBadReply(text)) {
+          console.warn(`Model ${modelName} trả lời checklist, bỏ qua: ${text.slice(0, 120)}`);
+          lastError = new Error('AI checklist reply: ' + text.slice(0, 120));
+          continue; // thử model tiếp theo
+        }
+        reply = text;
+        break;
       } catch (err) {
         lastError = err;
         const status = err && (err.status || err.statusCode);
@@ -429,6 +486,10 @@ ${alertContext}`;
     }
 
     if (!reply) {
+      // AI trả lời checklist / rỗng nhưng DB vẫn có số liệu -> trả lời trực tiếp từ số liệu thật
+      if (lastError && String(lastError.message || '').startsWith('AI checklist reply')) {
+        return res.json({ reply: buildLocalFallback() });
+      }
       // Phân loại lỗi để trả đúng mã và thông báo hữu ích
       const status = lastError && (lastError.status || lastError.statusCode);
       if (status === 404) {
