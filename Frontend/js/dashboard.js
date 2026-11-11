@@ -686,7 +686,7 @@
 
     connection.lastDataAt = Date.now(); // mốc giờ nhận ở trình duyệt, tránh lệch đồng hồ server -> báo offline oan
     connection.hasData = true;
-    connection.online = true; // vừa lấy được /latest là coi như đang hoạt động, không phụ thuộc cờ online của server
+    connection.online = data.online !== false; // tin cờ online từ server (OFFLINE_THRESHOLD_MS=15s)
   }
 
   function refreshData() {
