@@ -10,8 +10,7 @@
   var SENSOR_META = {
     temp:  { label: 'Nhiệt độ', unit: '°C',  color: '#fb923c', dim: 'rgba(251,146,60,0.13)',  decimals: 1 },
     hum:   { label: 'Độ ẩm',    unit: '%',   color: '#60a5fa', dim: 'rgba(96,165,250,0.13)',  decimals: 0 },
-    light: { label: 'Ánh sáng', unit: 'lux', color: '#facc15', dim: 'rgba(250,204,21,0.13)',  decimals: 0 },
-    rain:  { label: 'Mưa',       unit: '',    color: '#22d3ee', dim: 'rgba(34,211,238,0.13)',  decimals: 0 }
+    light: { label: 'Ánh sáng', unit: 'lux', color: '#facc15', dim: 'rgba(250,204,21,0.13)',  decimals: 0 }
   };
 
   var RANGE_LABEL = { '1h': '1 giờ', '6h': '6 giờ', '24h': '24 giờ', '7d': '7 ngày' };
@@ -19,9 +18,9 @@
   var SENSOR_LABEL = { temp: 'Nhiệt độ', hum: 'Độ ẩm', light: 'Ánh sáng' };
   var SEVERITY_LABEL = { high: 'Nghiêm trọng', medium: 'Trung bình', low: 'Thấp' };
 
-  var history = { temp: [], hum: [], light: [], rain: [], labels: [], range: '1h', active: 'temp', compare: false };
-  var latest = { temp: null, hum: null, light: null, rain: null, device_id: null, rssi: null, timestamp: null };
-  var previous = { temp: null, hum: null, light: null, rain: null };
+  var history = { temp: [], hum: [], light: [], labels: [], range: '1h', active: 'temp', compare: false };
+  var latest = { temp: null, hum: null, light: null, device_id: null, rssi: null, timestamp: null };
+  var previous = { temp: null, hum: null, light: null };
   var connection = { lastDataAt: 0, hasData: false, online: false };
   var pageLoadedAt = Date.now();
   var alertFilter = 'all';
@@ -145,27 +144,6 @@
     el.className = 'trend ' + (up ? 'up' : 'down');
   }
 
-  function setRainTrend(el) {
-    var current = latest.rain;
-    var prior = previous.rain;
-    if (current == null) {
-      el.textContent = '—';
-      el.className = 'trend';
-      return;
-    }
-    if (prior == null) {
-      el.textContent = current ? 'Đang có mưa' : 'Đang không mưa';
-      el.className = 'trend';
-      return;
-    }
-    if (current !== prior) {
-      el.textContent = current ? '↑ Vừa ghi nhận có mưa' : '↓ Vừa ghi nhận hết mưa';
-    } else {
-      el.textContent = current ? 'Vẫn đang có mưa' : 'Vẫn không có mưa';
-    }
-    el.className = 'trend';
-  }
-
   function updateSparkline(svgId, values, color) {
     var svg = $(svgId);
     if (!svg) return;
@@ -210,38 +188,32 @@
       var key = cfg[0], decimals = cfg[1], unit = cfg[2];
       var mm = minMaxOf(window_[key]);
       var el = $('range-' + key);
+      if (!el) return;
       if (!mm) {
         el.textContent = 'Chưa có dữ liệu';
         return;
       }
       el.textContent = mm.min.toFixed(decimals) + ' – ' + mm.max.toFixed(decimals) + unit;
     });
-
-    $('range-rain').textContent = latest.rain == null
-      ? 'Chưa có dữ liệu'
-      : (latest.rain ? 'Đang ướt (có mưa)' : 'Đang khô');
   }
 
   function updateSummaries() {
+    var st = $('summary-temp'), sh = $('summary-hum'), sl = $('summary-light');
     if (latest.temp == null) {
-      $('summary-temp').textContent = '—';
-      $('summary-hum').textContent = '—';
-      $('summary-light').textContent = '—';
-      $('summary-rain').textContent = '—';
+      if (st) st.textContent = '—';
+      if (sh) sh.textContent = '—';
+      if (sl) sl.textContent = '—';
       return;
     }
-    $('summary-temp').textContent = latest.temp > 31
+    if (st) st.textContent = latest.temp > 31
       ? 'Nhiệt độ cao'
       : latest.temp < 21 ? 'Nhiệt độ thấp' : 'Nhiệt độ ổn định';
-    $('summary-hum').textContent = latest.hum > 80
+    if (sh) sh.textContent = latest.hum > 80
       ? 'Độ ẩm cao, dễ ẩm mốc'
       : latest.hum < 35 ? 'Khô, dễ mất nước' : 'Độ ẩm trong ngưỡng';
-    $('summary-light').textContent = latest.light > 700
+    if (sl) sl.textContent = latest.light > 700
       ? 'Ánh sáng mạnh'
       : latest.light < 150 ? 'Môi trường tối' : 'Ánh sáng vừa phải';
-    $('summary-rain').textContent = latest.rain
-      ? 'Bề mặt ẩm, có khả năng mưa'
-      : 'Bề mặt khô, không có mưa';
   }
 
   function updateDeviceMeta() {
@@ -261,16 +233,14 @@
   }
 
   function updateCards() {
-    $('value-temp').textContent = latest.temp == null ? '--' : latest.temp.toFixed(1);
-    $('value-hum').textContent = latest.hum == null ? '--' : Math.round(latest.hum);
-    $('value-light').textContent = latest.light == null ? '--' : Math.round(latest.light);
-    $('value-rain').textContent = latest.rain == null ? '--' : (latest.rain ? '1' : '0');
-    $('rain-unit').textContent = '/ 1';
+    var vt = $('value-temp'), vh = $('value-hum'), vl = $('value-light');
+    if (vt) vt.textContent = latest.temp == null ? '--' : latest.temp.toFixed(1);
+    if (vh) vh.textContent = latest.hum == null ? '--' : Math.round(latest.hum);
+    if (vl) vl.textContent = latest.light == null ? '--' : Math.round(latest.light);
 
     setTrend('trend-temp', 'temp', '°C');
     setTrend('trend-hum', 'hum', '%');
     setTrend('trend-light', 'light', ' lux');
-    setRainTrend($('trend-rain'));
 
     updateCardMeta();
     updateSummaries();
@@ -279,11 +249,10 @@
     updateSparkline('spark-temp', history.temp.slice(-SPARK_POINTS), SENSOR_META.temp.color);
     updateSparkline('spark-hum', history.hum.slice(-SPARK_POINTS), SENSOR_META.hum.color);
     updateSparkline('spark-light', history.light.slice(-SPARK_POINTS), SENSOR_META.light.color);
-    updateSparkline('spark-rain', history.rain.slice(-SPARK_POINTS), SENSOR_META.rain.color);
   }
 
   function markStale(stale) {
-    ['temp', 'hum', 'light', 'rain'].forEach(function (key) {
+    ['temp', 'hum', 'light'].forEach(function (key) {
       var card = document.querySelector('.sensor-card[data-sensor="' + key + '"]');
       if (card) card.classList.toggle('is-stale', stale);
     });
@@ -414,11 +383,9 @@
       });
       setBadge('badge-' + key, recent ? 'abnormal' : 'normal');
     });
-    setBadge('badge-rain', 'normal');
 
     document.querySelectorAll('.sensor-card').forEach(function (card) {
       var key = card.getAttribute('data-sensor');
-      if (key === 'rain') return;
       var bad = allAlerts.some(function (a) {
         return a.sensor === key && now - new Date(a.created_at).getTime() < 60000;
       });
@@ -471,6 +438,9 @@
       .catch(function (err) {
         console.error('Không tải được cảnh báo:', err);
         $('last-check').textContent = 'Không tải được danh sách cảnh báo';
+        // Dù lỗi alerts vẫn phải nhả badge Đang chờ -> Bình thường, tránh kẹt pending
+        try { applyAlertBadges(); } catch (e) { /* bỏ qua */ }
+        updateBanner();
       });
   }
 
@@ -489,7 +459,6 @@
           temp: data.temp || [],
           hum: data.hum || [],
           light: data.light || [],
-          rain: data.rain || [],
           count: data.count || 0,
           downsampled: !!data.downsampled
         };
@@ -501,7 +470,6 @@
     history.temp = data.temp;
     history.hum = data.hum;
     history.light = data.light;
-    history.rain = data.rain;
   }
 
   function formatAxisLabel(iso, range) {
@@ -550,8 +518,7 @@
     if (typeof Chart === 'undefined') return; // CDN blocked — empty state carries the message
 
     var activeKey = history.active;
-    var meta = SENSOR_META[activeKey];
-    var isRain = activeKey === 'rain';
+    var meta = SENSOR_META[activeKey] || SENSOR_META.temp;
     var cmpKey = history.compare ? compareTarget() : null;
     var cmpMeta = cmpKey ? SENSOR_META[cmpKey] : null;
 
@@ -600,9 +567,6 @@
                 },
                 label: function (ctx) {
                   var unit = ctx.dataset.unit || '';
-                  if (ctx.dataset.label === 'Mưa') {
-                    return ctx.dataset.label + ': ' + (ctx.parsed.y >= 0.5 ? 'Có mưa' : 'Khô ráo');
-                  }
                   return ctx.dataset.label + ': ' + ctx.parsed.y + unit;
                 }
               }
@@ -641,44 +605,26 @@
 
     var datasets = [];
 
-    if (isRain) {
-      // Rain is a binary state — a bar chart reads correctly, a line chart does not.
-      datasets.push({
-        type: 'bar',
-        label: 'Mưa',
-        data: activeData,
-        backgroundColor: meta.color + 'cc',
-        borderColor: meta.color,
-        borderWidth: 1,
-        borderRadius: 2,
-        barPercentage: 0.85,
-        categoryPercentage: 0.9,
-        yAxisID: 'y',
-        unit: '',
-        order: 2
-      });
-    } else {
-      datasets.push({
-        type: 'line',
-        label: meta.label,
-        data: activeData,
-        borderColor: meta.color,
-        backgroundColor: meta.dim,
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        pointHoverBackgroundColor: meta.color,
-        pointHoverBorderColor: '#0b0f14',
-        pointHoverBorderWidth: 2,
-        tension: 0.32,
-        fill: true,
-        yAxisID: 'y',
-        unit: meta.unit,
-        order: 2
-      });
-    }
+    datasets.push({
+      type: 'line',
+      label: meta.label,
+      data: activeData,
+      borderColor: meta.color,
+      backgroundColor: meta.dim,
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointHoverBackgroundColor: meta.color,
+      pointHoverBorderColor: '#0b0f14',
+      pointHoverBorderWidth: 2,
+      tension: 0.32,
+      fill: true,
+      yAxisID: 'y',
+      unit: meta.unit,
+      order: 2
+    });
 
-    if (cmpKey && !isRain) {
+    if (cmpKey) {
       datasets.push({
         type: 'line',
         label: cmpMeta.label,
@@ -701,12 +647,12 @@
     chart.data.datasets = datasets;
     chart.options.scales.y.title = {
       display: true,
-      text: isRain ? 'Trạng thái mưa' : meta.label + ' (' + meta.unit + ')',
+      text: meta.label + ' (' + meta.unit + ')',
       color: '#6f8296',
       font: { size: 11, weight: '600' }
     };
-    chart.options.scales.y1.display = !!(cmpKey && !isRain);
-    if (cmpKey && !isRain) {
+    chart.options.scales.y1.display = !!cmpKey;
+    if (cmpKey) {
       chart.options.scales.y1.title = {
         display: true,
         text: cmpMeta.label + ' (' + cmpMeta.unit + ')',
@@ -715,12 +661,10 @@
       };
     }
     chart.options.scales.y.beginAtZero = false;
-    chart.options.scales.y.max = isRain ? 1 : undefined;
-    chart.options.scales.y.min = isRain ? 0 : undefined;
-    chart.options.scales.y.ticks.stepSize = isRain ? 1 : undefined;
-    chart.options.scales.y.ticks.callback = isRain
-      ? function (v) { return v >= 0.5 ? 'Mưa' : 'Khô'; }
-      : function (v) { return v; };
+    chart.options.scales.y.max = undefined;
+    chart.options.scales.y.min = undefined;
+    chart.options.scales.y.ticks.stepSize = undefined;
+    chart.options.scales.y.ticks.callback = function (v) { return v; };
 
     chart.update();
   }
@@ -732,19 +676,17 @@
     previous.temp = latest.temp;
     previous.hum = latest.hum;
     previous.light = latest.light;
-    previous.rain = latest.rain;
 
     latest.temp = data.temp;
     latest.hum = data.hum;
     latest.light = data.light;
-    latest.rain = data.rain;
     latest.device_id = data.device_id;
     latest.rssi = data.rssi;
     latest.timestamp = data.timestamp;
 
-    connection.lastDataAt = new Date(data.timestamp).getTime();
+    connection.lastDataAt = Date.now(); // mốc giờ nhận ở trình duyệt, tránh lệch đồng hồ server -> báo offline oan
     connection.hasData = true;
-    connection.online = data.online !== false;
+    connection.online = true; // vừa lấy được /latest là coi như đang hoạt động, không phụ thuộc cờ online của server
   }
 
   function refreshData() {
@@ -764,20 +706,35 @@
         if (!data) return null;
         $('last-updated').textContent = formatClock(new Date(data.timestamp));
         applyLatest(data);
+        // 1) Có dữ liệu mới -> báo online ngay, hiện số lên thẻ luôn
+        updateConnectionState();
+        updateCards();
+        // 2) Lịch sử + cảnh báo chạy riêng: lỗi thì vẫn giữ thẻ + trạng thái online
         return fetchHistory(history.range).then(function (h) {
           history.lastDownsampled = h.downsampled;
           history.lastCount = h.count;
           applyHistory(h);
+        }).catch(function (err) {
+          console.warn('Không tải được lịch sử, vẫn giữ số live:', err);
+        }).then(function () {
           updateCards();
           renderChart();
           updateChartSummary();
-          return loadAlerts();
+          return loadAlerts().catch(function (err) {
+            console.warn('Không tải được cảnh báo, vẫn giữ kết nối:', err);
+          });
+        }).then(function () {
+          updateConnectionState();
         });
       })
-      .then(updateConnectionState)
       .catch(function (err) {
         console.error(err);
-        setConnectionState('error', 'Lỗi kết nối server');
+        // Phân biệt: chưa từng có dữ liệu -> lỗi server; đã có dữ liệu -> chỉ mất kết nối, giữ số cũ
+        if (!connection.hasData) {
+          setConnectionState('error', 'Lỗi kết nối server');
+        } else {
+          setConnectionState('offline', 'Mất kết nối — đang hiện số cũ');
+        }
         updateBanner();
       })
       .then(function () {

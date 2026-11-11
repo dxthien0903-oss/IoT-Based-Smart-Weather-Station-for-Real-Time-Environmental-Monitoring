@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
-<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/style.css?v=3sensors" />
 </head>
 <body>
 <a class="skip-link" href="#main-content">Bỏ qua tới nội dung chính</a>
@@ -28,7 +28,7 @@
 </svg>
 
 <div class="stage" data-wx="partly-day">
-  <div class="bg" id="wx-bg" aria-hidden="true"><div class="rain-drops" id="rain-drops" aria-hidden="true"></div></div>
+  <div class="bg" id="wx-bg" aria-hidden="true"></div>
 
   <!-- SIDEBAR kiểu Aurora, nút cuộn tới từng khối tính năng -->
   <aside class="sidebar" aria-label="Điều hướng chính">
@@ -39,7 +39,7 @@
     <nav class="nav">
       <div class="nav-cap">Giám sát</div>
       <a href="#main-content" class="on" aria-label="Tổng quan" title="Tổng quan" data-tip="Tổng quan — về đầu trang" aria-current="page"><svg><use href="#i-grid"/></svg><span class="lbl">Tổng quan</span></a>
-      <a href="#stats-grid" aria-label="Cảm biến" title="Cảm biến" data-tip="Cảm biến — 4 chỉ số live"><svg><use href="#i-activity"/></svg><span class="lbl">Cảm biến</span></a>
+      <a href="#stats-grid" aria-label="Cảm biến" title="Cảm biến" data-tip="Cảm biến — 3 chỉ số live"><svg><use href="#i-activity"/></svg><span class="lbl">Cảm biến</span></a>
       <a href="#chart-panel" aria-label="Biểu đồ lịch sử" title="Biểu đồ lịch sử" data-tip="Biểu đồ — lịch sử theo giờ / ngày"><svg><use href="#i-chart"/></svg><span class="lbl">Biểu đồ</span></a>
       <a href="#alerts-panel" aria-label="Cảnh báo" title="Cảnh báo" data-tip="Cảnh báo bất thường"><svg><use href="#i-bell"/></svg><span class="lbl">Cảnh báo</span></a>
     </nav>
@@ -83,7 +83,7 @@
       <span id="ai-banner-text"></span>
     </div>
 
-    <!-- 4 THẺ CẢM BIẾN -->
+    <!-- 3 THẺ CẢM BIẾN -->
     <section class="stats-grid" id="stats-grid" aria-label="Chỉ số môi trường hiện tại" aria-busy="true">
       <article class="sensor-card temp" data-sensor="temp">
         <div class="card-head"><div class="sensor-id"><span class="sensor-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V4a2 2 0 0 0-4 0v10.76a4 4 0 1 0 4 0Z"/><path d="M12 8.5v6.5"/></svg></span><div class="sensor-names"><h2 class="sensor-name">Nhiệt độ</h2><span class="sensor-source">DHT22</span></div></div><span class="status-badge pending" id="badge-temp">Đang chờ</span></div>
@@ -106,13 +106,6 @@
         <div class="spark-wrap"><svg class="sparkline" id="spark-light" viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label="Xu hướng ánh sáng"></svg><span class="spark-caption">12 lần đo</span></div>
         <dl class="sensor-meta"><div><dt>Min – max</dt><dd id="range-light">--</dd></div><div><dt>Đánh giá</dt><dd id="summary-light">--</dd></div></dl>
       </article>
-      <article class="sensor-card rain" data-sensor="rain">
-        <div class="card-head"><div class="sensor-id"><span class="sensor-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 13v8M8 13v8M12 15v8"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/></svg></span><div class="sensor-names"><h2 class="sensor-name">Mưa</h2><span class="sensor-source">Cảm biến · nhị phân</span></div></div><span class="status-badge pending" id="badge-rain">Đang chờ</span></div>
-        <div class="sensor-reading"><strong id="value-rain">--</strong><span class="reading-unit" id="rain-unit">/ 1</span></div>
-        <div class="trend" id="trend-rain">—</div>
-        <div class="spark-wrap"><svg class="sparkline" id="spark-rain" viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label="Lịch sử mưa"></svg><span class="spark-caption">12 lần đo</span></div>
-        <dl class="sensor-meta"><div><dt>Trạng thái</dt><dd id="summary-rain">--</dd></div><div><dt>Cảm biến</dt><dd id="range-rain">--</dd></div></dl>
-      </article>
     </section>
     <p class="grid-note" aria-hidden="true">Sparkline: 12 lần đo gần nhất · số liệu cập nhật mỗi 10 giây</p>
 
@@ -132,7 +125,6 @@
           <button type="button" class="seg-btn active" data-key="temp" role="tab" aria-selected="true" aria-controls="history-chart" id="tab-temp">Nhiệt độ</button>
           <button type="button" class="seg-btn" data-key="hum" role="tab" aria-selected="false" aria-controls="history-chart" id="tab-hum">Độ ẩm</button>
           <button type="button" class="seg-btn" data-key="light" role="tab" aria-selected="false" aria-controls="history-chart" id="tab-light">Ánh sáng</button>
-          <button type="button" class="seg-btn" data-key="rain" role="tab" aria-selected="false" aria-controls="history-chart" id="tab-rain">Mưa</button>
         </div>
         <button type="button" class="btn btn-compare" id="compare-btn" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h18"/></svg><span>So sánh với Độ ẩm</span></button>
       </div>
@@ -189,20 +181,19 @@
   </div>
 </div>
 
-<script src="js/dashboard.js"></script>
-<script src="js/chatwidget.js"></script>
+<script src="js/dashboard.js?v=3sensors"></script>
+<script src="js/chatwidget.js?v=3sensors"></script>
 <script>
 // Hero live + dynamic weather background (như app thời tiết điện thoại).
 (function () {
   var base = location.protocol === 'file:' ? 'http://localhost:3000' : location.origin;
   var stage = document.querySelector('.stage');
   var bg = document.getElementById('wx-bg');
-  // Thứ tự ưu tiên: mưa > ánh sáng (LDR) > ngày/đêm theo giờ.
+  // Ưu tiên: ánh sáng (LDR) > ngày/đêm theo giờ.
   // Ngưỡng light khớp thang đánh giá trong dashboard.js: >700 mạnh, <150 tối.
   function classify(d) {
     var h = new Date(d.timestamp || Date.now()).getHours();
     var night = (h < 6 || h >= 18);
-    if (d.rain === 1) return night ? 'rain-night' : 'rain-day';
     if (!night) {
       if (d.light >= 700) return 'sunny-day';
       if (d.light >= 150) return 'partly-day';
@@ -213,8 +204,7 @@
   }
   var WX_LABEL = {
     'sunny-day': 'Nắng đẹp', 'partly-day': 'Ít mây', 'cloudy-day': 'Nhiều mây',
-    'clear-night': 'Đêm quang', 'cloudy-night': 'Đêm nhiều mây',
-    'rain-day': 'Đang mưa', 'rain-night': 'Đêm mưa'
+    'clear-night': 'Đêm quang', 'cloudy-night': 'Đêm nhiều mây'
   };
   function applyWx(d) {
     if (!stage || !d || d.temp == null) return;
@@ -243,7 +233,7 @@
       var c = document.getElementById('hero-cond');
       var b = document.getElementById('hero-blurb');
       if (t) t.textContent = Number(d.temp).toFixed(1) + '°C';
-      if (c) c.textContent = (d.rain ? 'Có mưa' : 'Không mưa') + ' · Ẩm ' + Math.round(d.hum) + '% · ' + Math.round(d.light) + ' lux';
+      if (c) c.textContent = 'Ẩm ' + Math.round(d.hum) + '% · ' + Math.round(d.light) + ' lux';
       if (b) b.textContent = 'Thiết bị ' + (d.device_id || 'ESP8266') + ' gửi lúc ' + new Date(d.timestamp).toLocaleTimeString('vi-VN') + '. Nhiệt độ ' + d.temp + '°C, độ ẩm ' + d.hum + '%. ' + (d.online === false ? 'Thiết bị đang ngoại tuyến.' : 'Dữ liệu đang cập nhật trực tiếp.');
     }).catch(function () {});
   }

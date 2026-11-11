@@ -27,14 +27,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .bg{position:fixed;inset:0;pointer-events:none;overflow:hidden;isolation:isolate;background-color:#04121b;background-image:url("../assets/storm-background.jpg"),linear-gradient(160deg,#0a2836 0%,#0d3547 30%,#123a3a 55%,#071420 100%);background-size:cover;background-position:center 25%;background-repeat:no-repeat;transition:opacity .7s var(--e-soft)}
 .stage::after{pointer-events:none}
 .bg.is-fading{opacity:0}
-/* Celestial glow (sun / moon) + rain streaks, driven by data-wx on .stage */
+/* Celestial glow (sun / moon), driven by data-wx on .stage */
 .bg::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .8s var(--e-soft)}
 .bg::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0}
-/* Lớp hạt mưa rời giống app iPhone: tạo bằng JS, chỉ hiện khi mưa */
-.rain-drops{position:absolute;inset:0;overflow:hidden;opacity:0;transition:opacity .6s var(--e-soft);pointer-events:none}
-.stage[data-wx="rain-day"] .rain-drops,.stage[data-wx="rain-night"] .rain-drops{opacity:1}
-.rain-drops i{position:absolute;top:-22%;width:calc(1.4*var(--u));border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,0) 0%,rgba(210,226,245,.85) 70%,rgba(255,255,255,.95) 100%);animation-name:rainDrop;animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}
-@keyframes rainDrop{from{transform:translate3d(0,-12vh,0)}to{transform:translate3d(calc(-28*var(--u)),122vh,0)}}
 /* Day — sunny: warm bright sky + sun glow */
 .stage[data-wx="sunny-day"] .bg{background-image:linear-gradient(180deg,#1c7fb8 0%,#4aa8d6 34%,#8fc6d8 58%,#cfe0b4 82%,#e9d9a4 100%)}
 .stage[data-wx="sunny-day"] .bg::before{opacity:1;background:radial-gradient(circle at 78% 22%,rgba(255,252,230,.95) 0,rgba(255,244,200,.75) 6%,rgba(255,240,190,.25) 16%,transparent 32%)}
@@ -44,11 +39,6 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* Day — overcast */
 .stage[data-wx="cloudy-day"] .bg{background-image:linear-gradient(180deg,#243b4d 0%,#3c5a6e 45%,#647d8a 75%,#8b9a94 100%)}
 .stage[data-wx="cloudy-day"] .bg::before{opacity:.5;background:radial-gradient(ellipse at 50% 18%,rgba(255,255,255,.35) 0 14%,transparent 40%)}
-/* Rain / storm — keep photo when present, dark tint + falling streaks */
-.stage[data-wx="rain-day"] .bg{background-image:url("../assets/storm-background.jpg"),linear-gradient(180deg,#0a202c 0%,#10333f 45%,#1a3a38 100%)}
-.stage[data-wx="rain-night"] .bg{background-image:url("../assets/storm-background.jpg"),linear-gradient(180deg,#020d16 0%,#071c28 55%,#0c2422 100%)}
-.stage[data-wx="rain-day"] .bg::after,.stage[data-wx="rain-night"] .bg::after{opacity:.55;animation:rainFall 1.1s linear infinite}
-@keyframes rainFall{from{transform:translateY(-6%) skewX(-12deg)}to{transform:translateY(6%) skewX(-12deg)}}
 /* Night — clear: deep navy + stars + moon */
 .stage[data-wx="clear-night"] .bg{background-image:linear-gradient(180deg,#010813 0%,#061a30 50%,#0b2c4a 78%,#123a52 100%)}
 .stage[data-wx="clear-night"] .bg::before{opacity:1;background:radial-gradient(circle at 78% 20%,rgba(240,246,255,.95) 0 3%,rgba(220,232,250,.35) 5%,transparent 12%),radial-gradient(circle at 20% 30%,#fff 0 .4%,transparent .8%),radial-gradient(circle at 35% 15%,#fff 0 .4%,transparent .8%),radial-gradient(circle at 55% 35%,#fff 0 .35%,transparent .7%),radial-gradient(circle at 65% 12%,#fff 0 .4%,transparent .8%),radial-gradient(circle at 45% 55%,#fff 0 .35%,transparent .7%),radial-gradient(circle at 12% 60%,#fff 0 .35%,transparent .7%)}
@@ -144,12 +134,12 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .app-banner.warn{background:rgba(251,191,36,.2);border-color:rgba(251,191,36,.4)}
 .banner-icon{width:calc(18*var(--u));height:calc(18*var(--u));flex:none}
 
-/* SENSOR CARDS */
-.stats-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:calc(16*var(--u))}
-.sensor-card{position:relative;overflow:hidden;display:flex;flex-direction:column;padding:calc(18*var(--u));border-radius:calc(24*var(--u));background:linear-gradient(165deg,rgba(255,255,255,.13) 0%,rgba(255,255,255,.055) 30%,rgba(255,255,255,.045) 62%,rgba(255,255,255,.095) 100%);backdrop-filter:blur(calc(22*var(--u))) saturate(160%) brightness(1.06);-webkit-backdrop-filter:blur(calc(22*var(--u))) saturate(160%) brightness(1.06);border:calc(1*var(--u)) solid rgba(255,255,255,.28);box-shadow:inset 0 calc(1*var(--u)) 0 rgba(255,255,255,.32),inset 0 calc(-12*var(--u)) calc(24*var(--u)) rgba(255,255,255,.05),0 calc(12*var(--u)) calc(32*var(--u)) rgba(2,10,18,.22)}
+/* SENSOR CARDS — 3 thẻ cân full-width sau khi bỏ mưa */
+.stats-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:calc(16*var(--u));align-items:stretch}
+.sensor-card{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;min-height:calc(240*var(--u));padding:calc(22*var(--u));border-radius:calc(24*var(--u));background:linear-gradient(165deg,rgba(255,255,255,.13) 0%,rgba(255,255,255,.055) 30%,rgba(255,255,255,.045) 62%,rgba(255,255,255,.095) 100%);backdrop-filter:blur(calc(22*var(--u))) saturate(160%) brightness(1.06);-webkit-backdrop-filter:blur(calc(22*var(--u))) saturate(160%) brightness(1.06);border:calc(1*var(--u)) solid rgba(255,255,255,.28);box-shadow:inset 0 calc(1*var(--u)) 0 rgba(255,255,255,.32),inset 0 calc(-12*var(--u)) calc(24*var(--u)) rgba(255,255,255,.05),0 calc(12*var(--u)) calc(32*var(--u)) rgba(2,10,18,.22)}
 .sensor-card::after{content:"";position:absolute;top:0;bottom:0;width:38%;pointer-events:none;background:linear-gradient(100deg,transparent 0%,rgba(255,255,255,.22) 50%,transparent 100%);transform:translate3d(-150%,0,0) skewX(-18deg);animation:sheen 1.15s var(--e-soft) 2.55s 1 both}
 .sensor-card::before{content:"";position:absolute;inset:0 0 auto 0;height:calc(2*var(--u));background:var(--sensor-color,#7dd3fc);opacity:.9}
-.sensor-card.temp{--sensor-color:#fb923c}.sensor-card.hum{--sensor-color:#60a5fa}.sensor-card.light{--sensor-color:#facc15}.sensor-card.rain{--sensor-color:#22d3ee}
+.sensor-card.temp{--sensor-color:#fb923c}.sensor-card.hum{--sensor-color:#60a5fa}.sensor-card.light{--sensor-color:#facc15}
 .sensor-card.is-stale{opacity:.65}
 .sensor-card.abnormal{border-color:rgba(248,113,113,.55)}
 .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:calc(8*var(--u));margin-bottom:calc(14*var(--u))}
@@ -262,7 +252,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .seg-group{max-width:100%;flex-wrap:wrap}
 .cell-value,.sensor-meta dd{max-width:100%}
 
-@media (max-width:1180px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:1180px){.stats-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:calc(12*var(--u))}}
 @media (max-width:860px){
   :root{--u:min(100vw/430,1.22px)}
   .sidebar{left:calc(12*var(--u));right:calc(12*var(--u));top:auto;bottom:calc(12*var(--u));width:auto;flex-direction:row;justify-content:space-around;align-items:center;padding:calc(10*var(--u));border-radius:calc(20*var(--u))}

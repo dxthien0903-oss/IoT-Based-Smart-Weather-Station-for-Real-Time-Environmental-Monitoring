@@ -124,9 +124,16 @@
   }
 
   // Minimal, safe markdown: bold + bullet lists only. Input is escaped first.
+  // Backend đã làm sạch **, nhưng frontend vẫn phòng hờ để không bao giờ hiện cụt kiểu "°C):**".
   function formatResponse(text) {
-    var html = escapeHtml(text);
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    var raw = String(text || '').replace(/\r/g, '');
+    // Bỏ markdown còn sót từ AI
+    raw = raw.replace(/\*\*(.*?)\*\*/g, '$1');
+    raw = raw.replace(/__([^_]+)__/g, '$1');
+    raw = raw.replace(/^#{1,6}\s+/gm, '');
+    raw = raw.replace(/`/g, '');
+    var html = escapeHtml(raw);
+    html = html.replace(/^\*\s+(.+)$/gm, '- $1'); // "* câu" của AI -> "- câu"
     html = html.replace(/^[•\-]\s+(.+)$/gm, '<li>$1</li>');
     html = html.replace(/(<li>[\s\S]*?<\/li>\n?)+/g, '<ul>$&</ul>');
     html = html.replace(/\n/g, '<br>');
