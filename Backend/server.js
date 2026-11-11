@@ -27,15 +27,15 @@ if (API_KEY === 'demo-key-change-me') {
 
 // ---------- Google Gemini AI ----------
 let genAI = null;
-// Thứ tự ưu tiên. Google thu hồi model không còn khả dụng (404) và
+// Thứ tự ưu tiên. Google thu hồi model cũ (404) và
 // model có thể tạm quá tải (503) — vì vậy thử lần lượt từ trên xuống.
 // Ghi đè được qua biến môi trường GEMINI_MODELS (phân tách bằng dấu phẩy).
-// Đã kiểm tra 11/11/2026: gemini-2.5-flash trả 404, gemini-3.5-flash trả 200 OK.
+// Tên model phải tồn tại thật trên Google AI Studio (xem https://ai.google.dev/models/gemini).
 const DEFAULT_GEMINI_MODELS = [
-  'gemini-3.5-flash',        // đã test OK, nhanh, tiếng Việt tốt
-  'gemini-3.6-flash',        // dự phòng
-  'gemini-3.8-flash',        // bản mới nhất còn hỗ trợ generateContent
-  'gemini-flash-latest',     // fallback cuối
+  'gemini-2.5-flash',        // bản ổn định, nhanh, tiếng Việt tốt
+  'gemini-2.0-flash',        // dự phòng
+  'gemini-1.5-flash',        // dự phòng cũ nhưng còn hỗ trợ
+  'gemini-flash-latest',     // fallback cuối (alias của Google)
 ];
 const GEMINI_MODELS = (process.env.GEMINI_MODELS
   ? process.env.GEMINI_MODELS.split(',').map((m) => m.trim()).filter(Boolean)
@@ -396,6 +396,40 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const cur = latest ? ` Hiện tại trạm đo được ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.` : '';
       return res.json({
         reply: `Mình có thể giúp bạn 4 việc.${cur} Bạn hỏi mình: 1) Thời tiết hiện tại thế nào. 2) Nhiệt độ, độ ẩm cao nhất, thấp nhất, trung bình 1 giờ qua. 3) Có cảnh báo bất thường nào không. 4) Tư vấn sức khỏe theo thời tiết, ví dụ trời nóng có nên ra ngoài không.`,
+      });
+    }
+    // Chào hỏi đơn giản — trả lời ngay, không gọi Gemini cho đỡ tốn quota.
+    if (/^(hi|hello|hey|yo|alo|chào|xìn chào|xin chào)\b/.test(q) || q.length <= 3) {
+      const cur = latest ? ` Trạm đang đo ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.` : '';
+      return res.json({ reply: `Chào bạn.${cur} Bạn muốn hỏi thời tiết hiện tại, max min 1 giờ qua, cảnh báo hay tư vấn sức khỏe?` });
+    }
+    // Hỏi cảnh báo — trả trực tiếp từ bảng alerts, không qua Gemini.
+    if (/cảnh báo|bất thường|alert/.test(q)) {
+      if (!recentAlerts.length) {
+        const cur = latest ? ` Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux, mọi thứ trong ngưỡng.` : '';
+        return res.json({ reply: `Không có cảnh báo bất thường nào gần đây.${cur}` });
+      }
+      const lines = recentAlerts.slice(0, 3).map((a) => `${a.reason} ${a.value} (lúc ${a.created_at})`).join('. ');
+      return res.json({ reply: `Có ${recentAlerts.length} cảnh báo gần đây. Gần nhất: ${lines}. Bạn mở mục Cảnh báo trên dashboard để xem chi tiết nhé.` });
+    }
+    // Hỏi tư vấn sức khỏe / nên làm gì — trả theo ngưỡng, khỏi gọi Gemini.
+    if (/sức khỏe|nên|mặc|uống|ra ngoài|tập|phơi|học/.test(q)) {
+      if (latest) {
+        let adv = '';
+        if (latest.temp >= 33) adv = 'Trời nóng, bạn hạn chế ra ngoài giờ nắng gắt, uống đủ nước nhé.';
+        else if (latest.temp >= 30) adv = 'Trời hơi nóng, đội mũ khi ra ngoài và uống nước đều nhé.';
+        else if (latest.temp < 21) adv = 'Trời hơi lạnh, bạn mặc thêm áo ấm nhé.';
+        else if (latest.hum > 80) adv = 'Độ ẩm cao, phòng dễ ẩm mốc, bạn giữ nhà thoáng nhé.';
+        else if (latest.light < 150) adv = 'Trời tối, bạn bật đèn đủ sáng nếu học bài nhé.';
+        else adv = 'Thời tiết dễ chịu, hợp đi lại và tập thể dục nhẹ.';
+        return res.json({ reply: `Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux. ${adv}` });
+      }
+    }
+    // Hỏi chung "hôm nay / hiện tại / bây giờ như thế nào" — tóm tắt khác fallback để đỡ lặp 1 câu.
+    if (/hôm nay|hom nay|hiện tại|hien tai|bây giờ|bay gio|thế nào|như thế nào|tình hình/.test(q) && latest && hourStats) {
+      const s = hourStats;
+      return res.json({
+        reply: `Hôm nay trạm ghi ${s.n} mẫu trong 1 giờ qua: nhiệt ${s.tMin.toFixed(1)} đến ${s.tMax.toFixed(1)}°C, ẩm ${Math.round(s.hMin)} đến ${Math.round(s.hMax)}%, sáng ${Math.round(s.lMin)} đến ${Math.round(s.lMax)} lux. Mới nhất lúc này ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`,
       });
     }
 

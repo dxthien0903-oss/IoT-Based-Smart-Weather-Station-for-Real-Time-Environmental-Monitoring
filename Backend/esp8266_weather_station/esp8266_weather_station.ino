@@ -181,7 +181,7 @@ void loop() {
     ",\"device_id\":\"" + String(DEVICE_ID) +
     "\",\"rssi\":" + String(WiFi.RSSI()) + "}";
 
-  Serial.printf("CDS=%d light=%d url=%s\n", cdsRaw, light, urlGui.c_str());
+  Serial.printf("CDS=%d light=%d\n", cdsRaw, light);
   if (guiDuLieu(urlGui, payload)) {
     digitalWrite(LED_OK, HIGH); delay(150);
     digitalWrite(LED_OK, LOW);
