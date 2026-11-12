@@ -425,13 +425,8 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         return res.json({ reply: `Hiện tại ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux. ${adv}` });
       }
     }
-    // Hỏi chung "hôm nay / hiện tại / bây giờ như thế nào" — tóm tắt khác fallback để đỡ lặp 1 câu.
-    if (/hôm nay|hom nay|hiện tại|hien tai|bây giờ|bay gio|thế nào|như thế nào|tình hình/.test(q) && latest && hourStats) {
-      const s = hourStats;
-      return res.json({
-        reply: `Hôm nay trạm ghi ${s.n} mẫu trong 1 giờ qua: nhiệt ${s.tMin.toFixed(1)} đến ${s.tMax.toFixed(1)}°C, ẩm ${Math.round(s.hMin)} đến ${Math.round(s.hMax)}%, sáng ${Math.round(s.lMin)} đến ${Math.round(s.lMax)} lux. Mới nhất lúc này ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux.`,
-      });
-    }
+    // Hỏi chung "hôm nay / hiện tại" mà có số liệu 1 giờ — để Gemini trả lời tự nhiên
+    // (không trả cứng ở đây để tránh lặp 1 câu). Chỉ giữ nhánh cứng cho max/min/tb ở trên.
 
     // Tính toán thống kê nhanh
     let stats = '';
@@ -469,20 +464,29 @@ LƯU Ý HỆ THỐNG: chỉ có 3 cảm biến trên (nhiệt độ DHT11, độ
         ).join('\n')}`
       : 'Không có cảnh báo bất thường nào gần đây.';
 
-    const systemPrompt = `Bạn là trợ lý AI của đồ án IoT Weather Station (ESP8266 + DHT11 + CDS quang trở).
-Bạn đang chat trực tiếp với sinh viên. Nhiệm vụ duy nhất: TRẢ LỜI TRỰC TIẾP câu hỏi bằng tiếng Việt, dựa trên DỮ LIỆU THẬT bên dưới.
+    const projectKnowledge = `KIẾN THỨC ĐỒ ÁN (dùng khi hỏi ngoài số liệu):
+- Phần cứng: ESP8266 NodeMCU, DHT11 đo nhiệt độ + độ ẩm ở chân D4, quang trở CDS ở chân A0, còi buzzer ở D5, LED_OK ở D8, LED_ALARM ở D6, ngưỡng tối CDS < 350, báo động khi temp > 35 độ hoặc trời tối, gửi mỗi 10 giây.
+- Phần mềm: Node.js + Express file Backend/server.js, SQLite file Backend/weather.db 2 bảng readings và alerts, API POST /api/sensors (cần header x-api-key), GET /api/sensors/latest, GET /api/sensors/history?range=1h|6h|24h|7d, GET /api/alerts, POST /api/chat, GET /api/health. Frontend HTML JS thuần + Chart.js, dashboard.js gọi API mỗi 10 giây, ngưỡng offline OFFLINE_THRESHOLD_MS 15 giây.
+- Khi hỏi đấu dây, code, WiFi, lỗi POST -1, EADDRINUSE, tunnel Cloudflare: giải thích theo đúng kiến thức này, ngắn gọn từng bước.`;
 
-CẤM TUYỆT ĐỐI:
-- Cấm trả lời kiểu checklist, chấm tiêu chí (ví dụ "short? Yes", "Friendly? Yes").
-- Cấm nhắc lại quy tắc, cấm nói về prompt.
-- CHỈ trả lời bằng TIẾNG VIỆT, cấm chêm câu tiếng Anh (cấm "Is...", "The weather...", "Latest Light", "Recent Alerts").
-- Cấm dùng ký tự markdown: cấm **, cấm *, cấm #, cấm -. Chỉ dùng văn bản thuần, mỗi ý một câu ngắn.
-- Hệ thống chỉ có 3 chỉ số: nhiệt độ (°C), độ ẩm (%), ánh sáng (lux). Cấm bịa mưa, gió, áp suất, UV, AQI. Nếu hỏi chỉ số không có, nói "hệ thống chưa có cảm biến này" rồi gợi ý theo 3 chỉ số hiện có.
-- Nếu hỏi max/min/trung bình 1 giờ: DÙNG NGAY số "Thống kê 1 giờ qua" bên dưới, không dùng số 20 lần đo, không bịa.
-- Nếu hỏi chung chung (thời tiết hiện tại, hôm nay): câu đầu tiên PHẢI nêu đủ 3 số mới nhất (ví dụ: 28.5°C, 58%, 655 lux). Không đổi số, không làm tròn bừa.
-- Nếu DỮ LIỆU là "Chưa có dữ liệu", nói rõ chưa có, không bịa số.
-- Trả lời dưới 150 từ, thân thiện, tối đa 2 emoji, luôn gắn với số cảm biến + cảnh báo.
-- Ví dụ cách trả lời đúng: "Hiện tại trạm đo được 28.5 độ C, ẩm 58 phần trăm, sáng 655 lux. Trời hơi nóng, bạn uống đủ nước nhé."
+    const systemPrompt = `Bạn là trợ lý AI của đồ án IoT Weather Station (ESP8266 + DHT11 + CDS quang trở).
+Bạn chat trực tiếp với sinh viên bằng tiếng Việt, thân thiện, tự nhiên như ChatGPT.
+
+2 CHẾ ĐỘ TRẢ LỜI:
+1) Hỏi SỐ LIỆU (thời tiết hiện tại, hôm nay, max min trung bình, cảnh báo): DÙNG SỐ THẬT bên dưới, không bịa. Hỏi max/min/trung bình 1 giờ thì dùng mục "Thống kê 1 giờ qua". Hỏi thời tiết hiện tại thì nêu đủ 3 số mới nhất.
+2) Hỏi NGOÀI LỀ (DHT11 là gì, CDS hoạt động sao, ESP8266 là gì, WiFi là gì, SQLite là gì, giải thích code, đấu dây sao, lỗi POST -1, EADDRINUSE, tunnel là gì, tư vấn học tập, sức khỏe, chào hỏi, cảm ơn, chuyện trò): TRẢ LỜI TỰ NHIÊN bằng kiến thức chung + mục KIẾN THỨC ĐỒ ÁN bên dưới, KHÔNG cần nhồi 3 số cảm biến, KHÔNG cần nhắc số liệu nếu không liên quan.
+
+QUY TẮC CHUNG:
+- CHỈ trả lời bằng TIẾNG VIỆT, không chêm câu tiếng Anh.
+- Không dùng markdown nặng: không **, không #, không \`. Gạch đầu dòng thì dùng "- " là được.
+- Hệ thống chỉ có 3 chỉ số thật: nhiệt độ (°C), độ ẩm (%), ánh sáng (lux). Không bịa mưa, gió, áp suất, UV, AQI. Hỏi chỉ số không có thì nói hệ thống chưa có cảm biến này.
+- Nếu DỮ LIỆU là "Chưa có dữ liệu" mà hỏi số thì nói rõ chưa có, không bịa số.
+- Trả lời dưới 200 từ, tối đa 2 emoji, mỗi ý một câu ngắn.
+- Cấm trả lời kiểu checklist chấm tiêu chí, cấm nhắc lại quy tắc, cấm nói về prompt.
+- Ví dụ số liệu đúng: "Hiện tại trạm đo được 28.5 độ C, ẩm 58 phần trăm, sáng 655 lux."
+- Ví dụ ngoài lề đúng: hỏi "DHT11 là gì" thì giải thích cảm biến nhiệt ẩm giá rẻ, kèm chân D4 trong đồ án.
+
+${projectKnowledge}
 
 DỮ LIỆU HỆ THỐNG HIỆN TẠI:
 ${sensorContext}
@@ -491,7 +495,12 @@ ${alertContext}`;
 
     const userText = message.trim();
     // Gộp hết vào 1 prompt user để tương thích mọi model Gemini (tránh lỗi systemInstruction bị bỏ qua)
-    const fullPrompt = systemPrompt + '\n\nCâu hỏi của người dùng: ' + userText + '\n\nHãy trả lời trực tiếp bằng tiếng Việt, văn bản thuần, không markdown, câu đầu tiên phải nêu đủ nhiệt độ, độ ẩm, ánh sáng.';
+    const isKnowledgeQ = /là gì|la gi|giải thích|giai thich|vì sao|vi sao|tại sao|tai sao|thế nào là|hướng dẫn|huong dan|đấu dây|dau day|dht|cds|ldr|esp8266|nodemcu|sqlite|tunnel|cloudflare|eaddrinuse|post -1|weather\.db|server\.js|dashboard|code|wifi|hotspot|\bapi\b|endpoint|cảm ơn|cam on|tạm biệt|tam biet|bạn là ai|ban la ai|bạn khỏe|kể chuyện|ke chuyen|^(hi|hello|hey|yo|alo|chào|xin chào)\b/i.test(userText)
+      && !/thời tiết|hom nay|hôm nay|hiện tại|hien tai|max|min|trung bình|cao nhất|thấp nhất|cảnh báo|bất thường|nhiệt độ|độ ẩm|ánh sáng|bao nhiêu|the nao/i.test(userText);
+    const tailRule = isKnowledgeQ
+      ? '\n\nĐây là câu hỏi kiến thức / trò chuyện, hãy trả lời tự nhiên bằng tiếng Việt, không cần nhồi số cảm biến.'
+      : '\n\nNếu là câu hỏi số liệu thời tiết hiện tại, câu đầu tiên nêu đủ nhiệt độ, độ ẩm, ánh sáng. Nếu hỏi max/min/trung bình thì dùng Thống kê 1 giờ qua.';
+    const fullPrompt = systemPrompt + '\n\nCâu hỏi của người dùng: ' + userText + tailRule;
 
     const cleanReply = (t) => {
       if (!t) return t;
@@ -518,15 +527,17 @@ ${alertContext}`;
       if (/(^|\n)\s*\*\s*is\s+\d/i.test(s) || /(^|\s)is\s+\d+\s*°?c/i.test(s)) return true;
       // Câu bị cắt cụt (kết thúc bằng dấu lửng) -> lỗi, thử model khác
       if (/[,:;(\-–—*]\s*$/.test(s)) return true;
+      // Chỉ ép đủ 3 số khi hỏi số liệu thời tiết; câu kiến thức / trò chuyện được miễn.
+      if (isKnowledgeQ) return false;
       if (s.length < 40 && /\d+\s*°C/.test(s) && (!s.includes('%') || !s.toLowerCase().includes('lux'))) return true;
       // Hỏi thời tiết mà thiếu 1 trong 3 số -> lỗi, thử model khác
-      if (/thời tiết|nhiệt độ|nóng|lạnh|ẩm|ánh sáng|hôm nay|hiện tại/i.test(userText)) {
+      if (/thời tiết|nhiệt độ|nóng|lạnh|ẩm|ánh sáng|hôm nay|hiện tại|max|min|trung bình|cao nhất|thấp nhất/i.test(userText)) {
         if (!s.includes('°C') || !s.includes('%') || !s.toLowerCase().includes('lux')) return true;
       }
       return false;
     };
 
-    const buildLocalFallback = () => {
+    const buildLocalFallback = (customQ) => {
       if (!latest) return 'Hiện chưa có dữ liệu từ ESP8266. Bạn kiểm tra lại thiết bị rồi hỏi lại giúp mình nhé.';
       const t = `Hiện tại trạm đo được ${latest.temp}°C, ẩm ${latest.hum}%, sáng ${latest.light} lux (lúc ${latest.created_at}).`;
       const adv = latest.temp > 31 ? ' Trời hơi nóng, bạn uống đủ nước nhé. ☀️'
@@ -535,6 +546,27 @@ ${alertContext}`;
         : latest.light < 150 ? ' Trời đang tối, bật đèn nếu học bài nhé. 💡'
         : ' Điều kiện khá dễ chịu để học tập và đi lại. 😊';
       return t + adv;
+    };
+
+    // Trả lời kiến thức đồ án NGOẠI TUYẾN — dùng khi Gemini chết (404/503/timeout)
+    // để hỏi ngoài lề vẫn khôn, không rớt về 1 câu số liệu.
+    const buildKnowledgeFallback = () => {
+      if (/dht11|dht ?11/.test(q)) return 'DHT11 là cảm biến nhiệt độ + độ ẩm giá rẻ, dùng 1 dây dữ liệu. Trong đồ án này DHT11 đấu vào chân D4 của NodeMCU, đọc mỗi 10 giây bằng dht.readTemperature và dht.readHumidity. Dải đo khoảng 0 đến 50 độ, ẩm 20 đến 90 phần trăm.';
+      if (/cds|quang trở|quang tro|ldr|ánh sáng.*(hoạt|nguyên|đo)/.test(q)) return 'CDS hay quang trở LDR là điện trở thay đổi theo ánh sáng, sáng mạnh thì trở nhỏ. Trong đồ án CDS đấu vào chân A0, ESP đọc analogRead 0 đến 1023 rồi map sang 0 đến 1200 lux. Ngưỡng trời tối là CDS dưới 350, lúc đó còi ở D5 kêu và LED báo ở D6 sáng.';
+      if (/esp8266|nodemcu|esp /.test(q)) return 'ESP8266 NodeMCU là vi điều khiển có WiFi 2.4GHz, chạy chế độ STA để bắt WiFi nhà hoặc hotspot. Trong đồ án nó đọc DHT11 ở D4 và CDS ở A0, rồi POST JSON lên server mỗi 10 giây kèm header x-api-key.';
+      if (/wifi|kết nối|ket noi|sta|hotspot/.test(q)) return 'ESP nối WiFi bằng WiFi.mode STA rồi WiFi.begin tên và mật khẩu trong secrets.h, chỉ vào được 2.4GHz. Mất mạng thì hàm connectWiFi gọi lại, chưa nối thì chưa gửi. Bạn nên dùng tên không dấu, để ESP cách điện thoại 1 đến 2m khi test hotspot.';
+      if (/sqlite|database|dữ liệu.*(lưu|đâu)|luu o dau|weather.db|bảng|bang /.test(q)) return 'Dữ liệu lưu trong file Backend/weather.db dạng SQLite, mở bằng better-sqlite3. Có 2 bảng readings chứa temp hum light device_id rssi created_at và alerts chứa sensor value expected reason severity. Server tạo bảng bằng CREATE TABLE IF NOT EXISTS trong server.js, dọn readings quá 30 ngày mỗi 6 tiếng.';
+      if (/đấu dây|dau day|chân|chan |sơ đồ|so do|mạch|mach /.test(q)) return 'Cách đấu chuẩn đồ án: DHT11 vào D4, CDS vào A0, còi buzzer vào D5, LED_OK vào D8, LED_ALARM vào D6. Nhớ dời LED_ALARM khỏi chân RX sang D6 để khỏi xung đột Serial. Cấp nguồn 3V3 GND đủ dòng cho WiFi.';
+      if (/post -1|post.*-1|-1 là gì/.test(q)) return 'POST -1 nghĩa là ESP chưa mở được kết nối HTTPS tới server, chưa liên quan API key. Hay gặp khi bắt hotspot yếu, tunnel Cloudflare đã đổi link, hoặc TLS hết RAM. Bạn kiểm tra link trong tunnel-url.txt có khớp secrets.h không, thử mở /api/health bằng 4G, rồi mới nạp lại.';
+      if (/eaddrinuse|3000.*dùng|address in use|port /.test(q)) return 'Lỗi EADDRINUSE là do bạn chạy 2 lần node server.js nên kẹt cổng 3000. Chỉ giữ 1 cửa sổ backend, tìm PID bằng Get-NetTCPConnection rồi Stop-Process, sau đó chạy lại node server.js trong thư mục Backend.';
+      if (/tunnel|cloudflare|trycloudflare|link.*https|public /.test(q)) return 'Tunnel Cloudflare dùng start-tunnel.ps1 để forward localhost 3000 ra link https ngẫu nhiên. Link đổi mỗi lần chạy lại, nên phải copy link mới trong tunnel-url.txt vào secrets.h rồi nạp lại ESP. Mở web public xong nhớ Ctrl F5 để hết cache.';
+      if (/\bapi\b|endpoint|\/api\//.test(q)) return 'Backend có 5 API chính trong server.js: POST /api/sensors cần x-api-key để ESP đẩy số, GET /api/sensors/latest lấy số mới nhất, GET /api/sensors/history lấy biểu đồ, GET /api/alerts lấy cảnh báo, POST /api/chat hỏi AI, GET /api/health kiểm tra sống.';
+      if (/server\.js|backend.*(làm|giải)/.test(q)) return 'File Backend/server.js chạy Express, việc chính là nhận POST /api/sensors, kiểm tra x-api-key và ngưỡng HARD_LIMITS, phát hiện lệch bằng detectAnomalies, INSERT vào SQLite weather.db, rồi mở GET latest history alerts chat cho web dashboard.js gọi mỗi 10 giây.';
+      if (/cảm ơn|cam on|thank/.test(q)) return 'Không có gì, chúc bạn demo suôn sẻ nhé. Bạn cần hỏi số liệu, đấu dây hay giải thích code thì cứ hỏi tiếp.';
+      if (/tạm biệt|tam biet|bye/.test(q)) return 'Tạm biệt bạn, cần gì về trạm thời tiết thì quay lại hỏi mình nhé.';
+      if (/bạn.*(khỏe|khoe)|ban la ai|bạn là ai|tên gì/.test(q)) return 'Mình là trợ lý AI của đồ án trạm thời tiết ESP8266, mình theo dõi nhiệt độ độ ẩm ánh sáng và giải thích code giúp bạn. Trạm hiện vẫn chạy bình thường.';
+      if (/thơ|tho |hát|hat |kể chuyện|ke chuyen|đố |do vui/.test(q)) return 'Mình chuyên về trạm thời tiết nên kể chuyện không hay lắm, nhưng mình có thể giải thích DHT11, CDS, ESP8266, WiFi, SQLite hay tư vấn sức khỏe theo thời tiết cho bạn.';
+      return 'Mình hiểu rồi. Về đồ án này mình có thể giải thích DHT11 ở D4, CDS ở A0, còi ở D5, backend server.js, SQLite weather.db, API latest history alerts, lỗi POST -1 hay EADDRINUSE. Bạn muốn mình giải thích phần nào kỹ hơn?';
     };
 
     let reply = null;
@@ -559,8 +591,8 @@ ${alertContext}`;
               { role: 'user', parts: [{ text: fullPrompt }] }
             ],
             generationConfig: {
-              maxOutputTokens: 400,
-              temperature: 0.2,
+              maxOutputTokens: isKnowledgeQ ? 600 : 400,
+              temperature: isKnowledgeQ ? 0.7 : 0.2,
             },
           }),
           MODEL_TIMEOUT_MS,
@@ -586,8 +618,12 @@ ${alertContext}`;
     }
 
     if (!reply) {
-      // AI lỗi /超时 / trả lời checklist nhưng DB vẫn có số liệu -> trả lời trực tiếp từ số liệu thật
-      // để khung chat không bao giờ treo ở "đang nhập...".
+      // Gemini chết (404/503/timeout) -> câu kiến thức trả từ kho ngoại tuyến cho khôn,
+      // câu số liệu trả từ DB để không bao giờ treo ở "đang nhập...".
+      if (isKnowledgeQ) {
+        if (lastError) console.warn('Dùng knowledge-fallback:', String((lastError && lastError.message) || lastError).slice(0, 150));
+        return res.json({ reply: buildKnowledgeFallback() });
+      }
       if (latest) {
         if (lastError) {
           const msg = String((lastError && lastError.message) || lastError).slice(0, 150);

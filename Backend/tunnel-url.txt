@@ -1,1 +1,1 @@
-https://others-alias-cattle-davis.trycloudflare.com/api/sensors
+https://resolved-procedure-alien-roland.trycloudflare.com/api/sensors

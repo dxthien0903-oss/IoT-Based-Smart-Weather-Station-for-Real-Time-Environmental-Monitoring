@@ -8,7 +8,7 @@
 #define DHTTYPE DHT11
 #define CDS_PIN A0
 #define LED_OK D8
-#define LED_ALARM 3  // RX
+#define LED_ALARM D6  // doi tu GPIO3 (RX) sang D6 de khoi xung dot Serial
 #define BUZZER_PIN D5
 #define NGUONG_TOI 350
 
@@ -133,6 +133,14 @@ void setup() {
   pinMode(LED_ALARM, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+  // Tu test coi + LED luc khoi dong: neu khong nghe tit la loi day coi
+  digitalWrite(LED_OK, HIGH);
+  digitalWrite(LED_ALARM, HIGH);
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(250);
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(LED_OK, LOW);
+  digitalWrite(LED_ALARM, LOW);
   dht.begin();
   connectWiFi();
 }
@@ -181,7 +189,7 @@ void loop() {
     ",\"device_id\":\"" + String(DEVICE_ID) +
     "\",\"rssi\":" + String(WiFi.RSSI()) + "}";
 
-  Serial.printf("CDS=%d light=%d\n", cdsRaw, light);
+  Serial.printf("CDS=%d light=%d alarm=%d (temp=%.1f)\n", cdsRaw, light, gAlarm ? 1 : 0, temp);
   if (guiDuLieu(urlGui, payload)) {
     digitalWrite(LED_OK, HIGH); delay(150);
     digitalWrite(LED_OK, LOW);
